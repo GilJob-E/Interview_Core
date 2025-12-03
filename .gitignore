@@ -1,0 +1,26 @@
+# 1. 보안 파일 (절대 업로드 금지)
+.env
+.env.*
+
+# 2. 파이썬 캐시 및 가상환경
+__pycache__/
+*.py[cod]
+venv/
+env/
+.venv/
+
+# 3. 대용량 바이너리 및 DLL (사용자가 직접 다운로드 받게 유도)
+*.dll
+*.lib
+*.exp
+*.zip
+*.onnx
+model.bin
+
+# 4. OS 관련 잡동사니
+.DS_Store
+Thumbs.db
+
+# 5. IDE 설정 파일
+.vscode/
+.idea/
