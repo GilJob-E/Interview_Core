@@ -11,7 +11,7 @@ SAMPLE_RATE = 16000  # 서버랑 똑같이 16000Hz
 CHANNELS = 1
 
 # 핵심 설정: 버퍼링 (끊김 방지)
-MIN_BUFFER_CHUNKS = 20  # 청크 20개가 쌓일 때까지 재생 안 하고 기다림
+# MIN_BUFFER_CHUNKS = 20  # Removed
 # ==========================================
 
 # 오디오 전송 큐 (Mic -> Server)
@@ -22,46 +22,62 @@ play_queue = queue.Queue()
 # 재생 상태 플래그
 is_playing = False
 buffer_filling = True # 처음엔 버퍼를 채우는 상태로 시작
+audio_buffer = bytearray()
+MIN_BUFFER_BYTES = 32000 # 1초 분량 (16000Hz * 2bytes)
 
 def audio_callback(indata, frames, time, status):
     """마이크 입력"""
     if status: print(f"Input Status: {status}")
-    # 볼륨이 너무 작으면(0.02 이하) 무시해서 환각 방지
-    if np.linalg.norm(indata) * 10 > 0.05:
-        send_queue.put(indata.copy().tobytes())
+    # 무조건 전송 (서버에서 VAD 처리)
+    send_queue.put(indata.copy().tobytes())
 
 def play_callback(outdata, frames, time, status):
     """스피커 출력 (Jitter Buffer Logic)"""
-    global is_playing, buffer_filling
+    global is_playing, buffer_filling, audio_buffer
     
-    # 1. 버퍼 채우는 중이면 침묵 재생
+    bytes_needed = frames * 2 # 16-bit mono = 2 bytes per frame
+    
+    # 1. 큐에서 데이터를 가져와서 내부 버퍼에 쌓음
+    while not play_queue.empty():
+        try:
+            chunk = play_queue.get_nowait()
+            audio_buffer.extend(chunk)
+        except queue.Empty:
+            break
+
+    # 2. 버퍼 채우는 중이면 침묵 재생
     if buffer_filling:
-        if play_queue.qsize() >= MIN_BUFFER_CHUNKS:
+        if len(audio_buffer) >= MIN_BUFFER_BYTES:
             print("[Buffer Full] 재생 시작!")
             buffer_filling = False # 버퍼 다 찼으니 재생 모드로 전환
-        
-        # 아직 덜 찼으면 0(침묵) 채우고 리턴
-        outdata[:] = np.zeros((frames, 1), dtype=np.int16)
-        return
+        else:
+            # 아직 덜 찼으면 0(침묵) 채우고 리턴
+            outdata[:] = np.zeros((frames, 1), dtype=np.int16)
+            return
 
-    # 2. 재생 모드
-    try:
-        data = play_queue.get_nowait()
-        chunk = np.frombuffer(data, dtype=np.int16)
+    # 3. 재생 모드
+    if len(audio_buffer) >= bytes_needed:
+        # 필요한 만큼 꺼내서 재생
+        data = audio_buffer[:bytes_needed]
+        del audio_buffer[:bytes_needed]
         
-        if len(chunk) < len(outdata):
+        chunk = np.frombuffer(data, dtype=np.int16)
+        outdata[:] = chunk.reshape(-1, 1)
+    else:
+        # 데이터 부족 (Underrun)
+        if len(audio_buffer) > 0:
+            # 남은거라도 재생
+            data = audio_buffer[:]
+            del audio_buffer[:]
+            chunk = np.frombuffer(data, dtype=np.int16)
             outdata[:len(chunk)] = chunk.reshape(-1, 1)
             outdata[len(chunk):] = 0
-            # 데이터가 떨어지면 다시 버퍼링 모드로? (선택사항)
-            # 여기서는 그냥 0으로 채우고 계속 진행
         else:
-            outdata[:] = chunk.reshape(-1, 1)
+            outdata[:] = 0
             
-    except queue.Empty:
-        # 재생 도중 큐가 비어버리면(Underrun) 다시 버퍼링 모드로 전환
+        # 다시 버퍼링 모드로 전환
         # print("[Buffer Empty] 다시 버퍼링 중...")
         buffer_filling = True
-        outdata[:] = np.zeros((frames, 1), dtype=np.int16)
 
 async def run_client():
     print(f"🔌 Connecting to {SERVER_URI}...")
