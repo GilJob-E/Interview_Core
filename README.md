@@ -1,4 +1,4 @@
-# 🧭 Giljob-E (길잡이) - Real-time Multimodal AI Interview Coach
+# Giljob-E (길잡이): Real-time Multimodal AI Interview Coach 
 
 ## Overview
 **Giljob-E**는 단순한 텍스트 챗봇이 아닌, **음성(Prosody), 내용(Lexical), 표정(Facial)** 정보를 실시간으로 분석하여 실제 면접관과 같은 피드백을 제공하는 AI 면접 솔루션입니다.
@@ -32,7 +32,8 @@ pip install -r requirements.txt
 
 ### 3. Environment 
 Create a .env file in the server/ directory:
-
+- https://elevenlabs.io/app/developers/api-keys
+- https://console.groq.com/keys
 ```
 GROQ_API_KEY=your_groq_key
 ELEVENLABS_API_KEY=your_elevenlabs_key
