@@ -32,7 +32,8 @@ pip install -r requirements.txt
 
 ### 3. Environment 
 Create a .env file in the server/ directory:
-
+- https://elevenlabs.io/app/developers/api-keys
+- https://console.groq.com/keys
 ```
 GROQ_API_KEY=your_groq_key
 ELEVENLABS_API_KEY=your_elevenlabs_key
