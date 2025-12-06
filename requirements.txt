@@ -9,3 +9,6 @@ numpy
 sounddevice
 python-multipart
 scipy
+openai
+anthropic
+xai-sdk
