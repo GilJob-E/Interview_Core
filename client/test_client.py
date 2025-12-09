@@ -3,70 +3,52 @@ import websockets
 import sounddevice as sd
 import numpy as np
 import queue
+import json
+import cv2          # [New] 비디오 캡처용
+import base64       # [New] 이미지 인코딩용
+import time         # [New] FPS 제어용
 
 # ==========================================
-# [설정]
 SERVER_URI = "ws://localhost:8000/ws/interview"
-SAMPLE_RATE = 16000  # 서버랑 똑같이 16000Hz
+SAMPLE_RATE = 16000
 CHANNELS = 1
-
-# 핵심 설정: 버퍼링 (끊김 방지)
-# MIN_BUFFER_CHUNKS = 20  # Removed
+MIN_BUFFER_BYTES = 32000 # Jitter Buffer (약 1초)
 # ==========================================
 
-# 오디오 전송 큐 (Mic -> Server)
 send_queue = queue.Queue()
-# 오디오 재생 큐 (Server -> Speaker)
 play_queue = queue.Queue()
-
-# 재생 상태 플래그
-is_playing = False
-buffer_filling = True # 처음엔 버퍼를 채우는 상태로 시작
 audio_buffer = bytearray()
-MIN_BUFFER_BYTES = 32000 # 1초 분량 (16000Hz * 2bytes)
+buffer_filling = True
 
 def audio_callback(indata, frames, time, status):
-    """마이크 입력"""
     if status: print(f"Input Status: {status}")
-    # 무조건 전송 (서버에서 VAD 처리)
     send_queue.put(indata.copy().tobytes())
 
 def play_callback(outdata, frames, time, status):
-    """스피커 출력 (Jitter Buffer Logic)"""
-    global is_playing, buffer_filling, audio_buffer
+    global buffer_filling, audio_buffer
+    bytes_needed = frames * 2 
     
-    bytes_needed = frames * 2 # 16-bit mono = 2 bytes per frame
-    
-    # 1. 큐에서 데이터를 가져와서 내부 버퍼에 쌓음
     while not play_queue.empty():
         try:
             chunk = play_queue.get_nowait()
             audio_buffer.extend(chunk)
-        except queue.Empty:
-            break
+        except queue.Empty: break
 
-    # 2. 버퍼 채우는 중이면 침묵 재생
     if buffer_filling:
         if len(audio_buffer) >= MIN_BUFFER_BYTES:
-            print("[Buffer Full] 재생 시작!")
-            buffer_filling = False # 버퍼 다 찼으니 재생 모드로 전환
+            #print("[Buffer Full] Playing...")
+            buffer_filling = False
         else:
-            # 아직 덜 찼으면 0(침묵) 채우고 리턴
-            outdata[:] = np.zeros((frames, 1), dtype=np.int16)
+            outdata[:] = 0
             return
 
-    # 3. 재생 모드
     if len(audio_buffer) >= bytes_needed:
-        # 필요한 만큼 꺼내서 재생
         data = audio_buffer[:bytes_needed]
         del audio_buffer[:bytes_needed]
-        
         chunk = np.frombuffer(data, dtype=np.int16)
         outdata[:] = chunk.reshape(-1, 1)
     else:
-        # 데이터 부족 (Underrun)
         if len(audio_buffer) > 0:
-            # 남은거라도 재생
             data = audio_buffer[:]
             del audio_buffer[:]
             chunk = np.frombuffer(data, dtype=np.int16)
@@ -74,56 +56,123 @@ def play_callback(outdata, frames, time, status):
             outdata[len(chunk):] = 0
         else:
             outdata[:] = 0
-            
-        # 다시 버퍼링 모드로 전환
-        # print("[Buffer Empty] 다시 버퍼링 중...")
         buffer_filling = True
 
 async def run_client():
-    print(f"🔌 Connecting to {SERVER_URI}...")
+    # 1. [New] 웹캠 초기화
+    cap = cv2.VideoCapture(0)
     
+    # 전송 속도 최적화를 위해 해상도를 낮춥니다 (320x240)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+    
+    if not cap.isOpened():
+        print("Warning: Camera not found. Video will not be sent.")
+    else:
+        print("Camera initialized successfully.")
+
+    print(f"Connecting to {SERVER_URI}...")
     async with websockets.connect(SERVER_URI) as websocket:
-        print("Connected! (마이크에 대고 말하세요)")
+        print("Connected! (Speak now)")
         
-        # 1. 입력 스트림 (마이크)
-        input_stream = sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype='float32',
-            callback=audio_callback,
-            blocksize=2048
-        )
-
-        # 2. 출력 스트림 (스피커)
-        output_stream = sd.OutputStream(
-            samplerate=SAMPLE_RATE, # 16000Hz 필수
-            channels=CHANNELS,
-            dtype='int16', 
-            callback=play_callback,
-            blocksize=2048 # 블록 크기 맞춤
-        )
-
+        input_stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype='float32', callback=audio_callback, blocksize=2048)
+        output_stream = sd.OutputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype='int16', callback=play_callback, blocksize=2048)
+        
         input_stream.start()
         output_stream.start()
 
+        # [New] 비디오 전송 타이머 (5 FPS 제한)
+        last_frame_time = 0
+        FRAME_INTERVAL = 0.2 
+
         try:
             while True:
-                # [Send]
+                # [1] 오디오 전송
                 while not send_queue.empty():
                     data = send_queue.get()
                     await websocket.send(data)
 
-                # [Receive]
+                # [2] [New] 비디오 프레임 캡처 및 전송
+                if cap.isOpened():
+                    current_time = time.time()
+                    if current_time - last_frame_time > FRAME_INTERVAL:
+                        ret, frame = cap.read()
+                        if ret:
+                            # 이미지를 JPG로 압축 (품질 80)
+                            _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                            # Base64로 인코딩하여 문자열로 변환
+                            b64_data = base64.b64encode(buffer).decode('utf-8')
+                            
+                            # JSON 메시지로 전송
+                            msg = {
+                                "type": "video_frame",
+                                "data": b64_data
+                            }
+                            await websocket.send(json.dumps(msg))
+                            last_frame_time = current_time
+
+                # [3] 데이터 수신 (기존 로직 유지)
                 try:
-                    # 0.001초만 기다려봄 (Non-blocking 느낌)
                     message = await asyncio.wait_for(websocket.recv(), timeout=0.001)
                     
+                    # 텍스트/JSON 메시지 처리
                     if isinstance(message, str):
-                        print(f"\n[AI]: {message}")
+                        try:
+                            res = json.loads(message)
+                            msg_type = res.get("type")
+                            
+                            if msg_type == "user_text":
+                                print(f"\n[User]: {res['data']}")
+                            elif msg_type == "ai_text":
+                                print(f"[AI]: {res['data']}")
+                            elif msg_type == "feedback":
+                                # 상세 분석 결과 출력
+                                print("\n[Analysis Result]")
+                                features = res['data'].get('multimodal_features', {})
+                                
+                                # (1) Audio Stats
+                                audio = features.get('audio', {})
+                                if audio and "error" not in audio:
+                                    print("   [Audio]")
+                                    print(f"      - Pitch:       {audio.get('pitch', {}).get('value')} Hz\t(Z: {audio.get('pitch', {}).get('z_score')})")
+                                    print(f"      - Intensity:      {audio.get('intensity', {}).get('value')} dB\t(Z: {audio.get('intensity', {}).get('z_score')})")
+                                    print(f"      - F1-Bandwidth:     {audio.get('f1_bandwidth', {}).get('value')} Hz\t(Z: {audio.get('f1_bandwidth', {}).get('z_score')})")
+                                    print(f"      - Pause Duration:       {audio.get('pause_duration', {}).get('value')} sec\t(Z: {audio.get('pause_duration', {}).get('z_score')})")
+                                    print(f"      - Unvoiced Rate:    {audio.get('unvoiced_rate', {}).get('value')} %\t(Z: {audio.get('unvoiced_rate', {}).get('z_score')})")
+                                else:
+                                    print("   [Audio] N/A")
+
+                                # (2) Text Stats
+                                text = features.get('text', {})
+                                if text:
+                                    if "error" in text:
+                                        print(f"   [Text] Error: {text['error']}")
+                                    else:
+                                        print("   [Text]")
+                                        print(f"      - Speed(wpsec):   {text.get('wpsec', {}).get('value')} wps\t(Z: {text.get('wpsec', {}).get('z_score')})")
+                                        print(f"      - Diversity(upsec): {text.get('upsec', {}).get('value')} ups\t(Z: {text.get('upsec', {}).get('z_score')})")
+                                        print(f"      - Fillers:        {text.get('fillers', {}).get('value')} /sec\t(Z: {text.get('fillers', {}).get('z_score')})")
+                                        print(f"      - Quantifiers:    {text.get('quantifier', {}).get('value')} ratio\t(Z: {text.get('quantifier', {}).get('z_score')})")
+                                else:
+                                    print("   [Text] N/A")
+
+                                # (3) Video Stats
+                                video = features.get('video', {})
+                                if "error" in video:
+                                    # 카메라가 없거나 얼굴이 안 잡혔을 때
+                                    print(f"   [Vision] Error/No Face: {video.get('error', 'Unknown')}")
+                                else:
+                                    print("   [Vision]")
+                                    print(f"      - Eye Contact: {video.get('eye_contact', {}).get('value')} ratio\t(Z: {video.get('eye_contact', {}).get('z_score')})")
+                                    print(f"      - Smile:       {video.get('smile', {}).get('value')} score\t(Z: {video.get('smile', {}).get('z_score')})")
+                                    print(f"      - Nods:        {video.get('head_nod', {}).get('value')} times")
+                                    
+                        except json.JSONDecodeError:
+                            print(f"[Raw Text]: {message}")
+                            
+                    # 오디오 데이터 재생
                     elif isinstance(message, bytes):
-                        # 오디오 데이터가 오면 큐에 넣음 (바로 재생 X)
                         play_queue.put(message)
-                        # print(f".", end="", flush=True) # 데이터 수신 표시
                         
                 except asyncio.TimeoutError:
                     pass
@@ -131,8 +180,9 @@ async def run_client():
                 await asyncio.sleep(0.001)
 
         except KeyboardInterrupt:
-            print("\n종료")
+            print("\nStopped.")
         finally:
+            cap.release() # 카메라 해제
             input_stream.stop()
             output_stream.stop()
 
