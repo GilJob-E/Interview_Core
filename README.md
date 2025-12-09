@@ -16,6 +16,7 @@
 | **STT** | Faster-Whisper (Local GPU Accelerated) + Silero VAD |
 | **LLM** | Groq API (Llama-3-70b) |
 | **TTS** | ElevenLabs Turbo v2.5 (PCM Streaming) |
+| **RAG** | LangChain + FAISS + HuggingFace Embeddings |
 | **Server** | Python FastAPI, WebSocket |
 | **Client** | Python (SoundDevice, NumPy) |
 
@@ -46,6 +47,18 @@ Download cuDNN v9 and zlibwapi.dll.
 
 Place the .dll files in the server/ directory.
 
+
+## RAG System
+68,000+ 면접 Q&A 데이터 기반 Retrieval Augmented Generation 시스템.
+지원자 답변에 대해 유사한 면접 질문을 검색하여 맥락에 맞는 꼬리질문을 생성합니다.
+
+```python
+from rag import RAGSystem
+rag = RAGSystem()
+response = rag.generate("저는 팀 프로젝트에서 리더 역할을 맡았습니다.")
+```
+
+📖 **상세 문서**: [docs/RAG.md](docs/RAG.md)
 
 ##  Usage
 ### 1. Start Server

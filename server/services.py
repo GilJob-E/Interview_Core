@@ -1,17 +1,27 @@
 import os
 import io
+from typing import Optional, Iterator
 import numpy as np
 import soundfile as sf  # [New] numpy -> wav 변환용
 from groq import Groq
 from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
 
+# RAG 시스템 import
+from rag import RAGSystem, index_exists
+
 load_dotenv()
 
 class AIOrchestrator:
-    def __init__(self):
+    def __init__(self, use_rag: bool = True):
+        """
+        AI Orchestrator 초기화
+
+        Args:
+            use_rag: RAG 시스템 사용 여부 (기본값: True)
+        """
         print("[System] Initializing AI Models (Cloud API Mode)...")
-        
+
         # 1. STT: Faster-Whisper (Local GPU) -> Groq API (Cloud)
         print("[STT] Using Groq Whisper API (No Local GPU required).")
 
@@ -23,6 +33,25 @@ class AIOrchestrator:
         # 3. TTS: ElevenLabs
         self.tts_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
         print("[TTS] ElevenLabs Client Connected.")
+
+        # 4. RAG 시스템 초기화
+        self.use_rag = use_rag
+        self.rag_system: Optional[RAGSystem] = None
+
+        if self.use_rag:
+            if index_exists():
+                try:
+                    print("[RAG] Initializing RAG System...")
+                    self.rag_system = RAGSystem()
+                    print("[RAG] RAG System Ready.")
+                except Exception as e:
+                    print(f"[RAG] Failed to initialize: {e}")
+                    print("[RAG] Falling back to non-RAG mode.")
+                    self.use_rag = False
+            else:
+                print("[RAG] Vector index not found. Run 'python -m rag.build_index' first.")
+                print("[RAG] Operating in non-RAG mode.")
+                self.use_rag = False
 
     def transcribe_audio(self, audio_data: np.ndarray):
         """
@@ -81,8 +110,59 @@ class AIOrchestrator:
             if text.endswith(ending): return True
         return False
 
-    def generate_llm_response(self, user_text: str):
-        model_id = "llama-3.3-70b-versatile" 
+    def generate_llm_response(
+        self,
+        user_text: str,
+        occupation: Optional[str] = None,
+        experience: Optional[str] = None
+    ) -> Iterator[str]:
+        """
+        LLM 응답 생성 (RAG 또는 기본 모드)
+
+        Args:
+            user_text: 사용자 입력 (면접 답변)
+            occupation: 직업군 필터 (예: "ICT", "BM", "SM")
+            experience: 경력 필터 (예: "EXPERIENCED", "NEW")
+
+        Yields:
+            응답 텍스트 청크 (스트리밍)
+        """
+        # RAG 모드: 유사한 질문들을 검색하여 컨텍스트로 활용
+        if self.use_rag and self.rag_system:
+            print(f"[RAG] Generating response with RAG (occupation={occupation}, experience={experience})")
+            for chunk in self.rag_system.stream(user_text, occupation, experience):
+                yield chunk
+        else:
+            # 기본 모드: 기존 방식 유지
+            print("[LLM] Generating response without RAG")
+            model_id = "llama-3.3-70b-versatile"
+            system_prompt = (
+                "당신은 친절하지만 날카로운 면접관입니다. "
+                "지원자의 답변을 듣고 꼬리질문을 하거나 한국어로 피드백을 주세요. "
+                "답변은 구어체로 짧고 간결하게(2~3문장 이내) 하세요."
+            )
+            response = self.groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_text},
+                ],
+                model=model_id,
+                stream=True
+            )
+            # Groq API 스트리밍 응답을 텍스트 청크로 변환
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+
+    def generate_llm_response_legacy(self, user_text: str):
+        """
+        기존 LLM 응답 생성 (하위 호환성 유지)
+        main.py에서 기존 방식으로 호출하는 경우를 위해 유지
+
+        Returns:
+            Groq API 스트리밍 응답 객체
+        """
+        model_id = "llama-3.3-70b-versatile"
         system_prompt = (
             "당신은 친절하지만 날카로운 면접관입니다. "
             "지원자의 답변을 듣고 꼬리질문을 하거나 한국어로 피드백을 주세요. "
@@ -94,7 +174,7 @@ class AIOrchestrator:
                 {"role": "user", "content": user_text},
             ],
             model=model_id,
-            stream=True 
+            stream=True
         )
 
     def text_to_speech_stream(self, text: str):
