@@ -108,7 +108,8 @@ def create_rag_chain(
         model=model,
         api_key=os.getenv("GROQ_API_KEY"),
         temperature=temperature,
-        streaming=True
+        streaming=True,
+        max_tokens=500  # 무한 반복 방지
     )
 
     # 프롬프트 템플릿
@@ -166,7 +167,8 @@ def create_filtered_chain(
         model=model,
         api_key=os.getenv("GROQ_API_KEY"),
         temperature=temperature,
-        streaming=True
+        streaming=True,
+        max_tokens=500  # 무한 반복 방지
     )
 
     # 프롬프트 템플릿

@@ -134,13 +134,22 @@ async def interview_endpoint(websocket: WebSocket):
 
                             # 3. LLM & TTS
                             llm_stream = ai_engine.generate_llm_response(user_text)
-                            buffer = "" 
+                            buffer = ""
                             print("[TTS] Streaming Start...")
-                            
-                            for chunk in llm_stream:
-                                if chunk.choices[0].delta.content:
-                                    token = chunk.choices[0].delta.content
+
+                            MAX_TTS_LENGTH = 1000  # TTS 최대 문자 수
+                            total_length = 0
+
+                            for token in llm_stream:
+                                if token:
                                     buffer += token
+                                    total_length += len(token)
+
+                                    # 무한 반복 감지: 총 길이 초과 시 중단
+                                    if total_length > MAX_TTS_LENGTH:
+                                        print(f"[Warning] Response too long ({total_length}), truncating...")
+                                        break
+
                                     if any(punct in token for punct in [".", "?", "!", "\n"]):
                                         sentence = buffer.strip()
                                         if sentence:
@@ -149,8 +158,9 @@ async def interview_endpoint(websocket: WebSocket):
                                             for audio_chunk in audio_stream:
                                                 await websocket.send_bytes(audio_chunk)
                                         buffer = ""
-                            
-                            if buffer.strip():
+
+                            if buffer.strip() and len(buffer.strip()) <= MAX_TTS_LENGTH:
+                                print(f"   -> TTS Generating (Rem): {buffer.strip()}")
                                 await websocket.send_json({"type": "ai_text", "data": buffer.strip()})
                                 audio_stream = ai_engine.text_to_speech_stream(buffer.strip())
                                 for audio_chunk in audio_stream:

@@ -120,7 +120,7 @@ class RAGSystem:
         """
         # 필터가 있으면 필터링된 체인 사용
         if occupation or experience:
-            chain, _ = create_filtered_chain(
+            chain, retriever = create_filtered_chain(
                 self.vectorstore,
                 occupation=occupation,
                 experience=experience,
@@ -130,6 +130,16 @@ class RAGSystem:
             )
         else:
             chain = self.chain
+            retriever = self.retriever
+
+        # 참조된 문서 로그 출력
+        docs = retriever.invoke(user_text)
+        print(f"[RAG] Retrieved {len(docs)} documents:")
+        for i, doc in enumerate(docs, 1):
+            occ = doc.metadata.get('occupation', 'N/A')
+            exp = doc.metadata.get('experience', 'N/A')
+            q = doc.metadata.get('question', doc.page_content)[:50]
+            print(f"  [{i}] ({occ}/{exp}) Q: {q}...")
 
         yield from stream_response(chain, user_text)
 

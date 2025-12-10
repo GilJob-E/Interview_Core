@@ -147,7 +147,8 @@ class AIOrchestrator:
                     {"role": "user", "content": user_text},
                 ],
                 model=model_id,
-                stream=True
+                stream=True,
+                max_tokens=500  # 무한 반복 방지
             )
             # Groq API 스트리밍 응답을 텍스트 청크로 변환
             for chunk in response:
