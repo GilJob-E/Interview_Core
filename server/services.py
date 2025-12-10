@@ -73,10 +73,10 @@ class AIOrchestrator:
         text = text.strip()
         short_phrases = ["네", "아니요", "안녕하세요", "반갑습니다", "그렇습니다", "맞습니다"]
         if text in short_phrases: return True
-        connective_endings = ["고.", "는데.", "지만.", "서.", "며.", "면서."]
+        connective_endings = ["고.", "는데.", "지만.", "서.", "며.", "면서.", "고요.", "구요."]
         for ending in connective_endings:
             if text.endswith(ending): return False
-        definitive_endings = ["다.", "요.", "죠.", "까.", "야.", "해.", "?", "!"]
+        definitive_endings = ["다.", "죠.", "까.", "야.", "해.", "?", "!"]
         for ending in definitive_endings:
             if text.endswith(ending): return True
         return False
