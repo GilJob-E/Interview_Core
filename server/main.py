@@ -26,9 +26,10 @@ async def interview_endpoint(websocket: WebSocket):
         is_speaking = False
         SILENCE_THRESHOLD = 0.03 
         
-        # Semantic VAD Variables
-        MIN_PAUSE = 1.2
-        MAX_PAUSE = 4.0  
+        # [수정 1] 기본 상수 (Base Values)
+        BASE_MIN_PAUSE = 0.8  # 단답형은 더 빨리 반응하도록 낮춤 (0.8초)
+        BASE_MAX_PAUSE = 2.5  # 기본 최대 대기
+        
         checked_intermediate = False
 
         while True:
@@ -63,14 +64,27 @@ async def interview_endpoint(websocket: WebSocket):
                         
                         audio_buffer.extend(data)
 
+                        # [수정 2] 발화 시간 계산
+                        current_speech_duration = len(audio_buffer) / 64000.0
+
+                        # [수정 3] 로그 스케일 적용 (장문 대기 시간 상향)
+                        # np.log1p(x) = ln(1 + x)
+                        log_factor = np.log1p(current_speech_duration)
+                        
+                        # 계수 상향 조정 (Longer Wait for Long Speech)
+                        # MIN: 기본 0.8초 + (로그값 * 0.8) -> 30초 말하면 약 3.5초 대기
+                        # MAX: 기본 2.5초 + (로그값 * 1.5) -> 30초 말하면 약 6초 대기
+                        dynamic_min_pause = BASE_MIN_PAUSE + (log_factor * 0.8) 
+                        dynamic_max_pause = BASE_MAX_PAUSE + (log_factor * 1.0) 
+
                         current_time = asyncio.get_event_loop().time()
                         silence_duration = current_time - silence_start_time
                         
                         should_process = False
                         
                         # A. 1차 점검 (Semantic Check)
-                        if silence_duration > MIN_PAUSE and not checked_intermediate:
-                            print(f"[VAD] Intermediate Check ({silence_duration:.2f}s)...")
+                        if silence_duration > dynamic_min_pause and not checked_intermediate:
+                            print(f"[VAD] Check (Speech: {current_speech_duration:.1f}s, LogWait: {dynamic_min_pause:.2f}s)...")
                             temp_audio = np.frombuffer(bytes(audio_buffer), dtype=np.float32)
                             temp_text = ai_engine.transcribe_audio(temp_audio)
                             
@@ -81,11 +95,11 @@ async def interview_endpoint(websocket: WebSocket):
                                 checked_intermediate = True
 
                         # B. 최대 시간 초과
-                        if silence_duration > MAX_PAUSE:
-                            print(f"[VAD] Max Pause Reached. Forcing process.")
+                        if silence_duration > dynamic_max_pause:
+                            print(f"[VAD] Max Pause Reached ({dynamic_max_pause:.2f}s). Forcing process.")
                             should_process = True
 
-                        # --- [턴 종료 처리 및 분석 시작] ---
+                        # --- [턴 종료 처리] ---
                         if should_process:
                             full_audio_bytes = bytes(audio_buffer)
                             full_audio_np = np.frombuffer(full_audio_bytes, dtype=np.float32)
@@ -94,7 +108,6 @@ async def interview_endpoint(websocket: WebSocket):
                             print("[STT] Transcribing Final...")
                             user_text = ai_engine.transcribe_audio(full_audio_np)
                             
-                            # 초기화
                             audio_buffer = bytearray()
                             is_speaking = False
                             silence_start_time = 0
@@ -103,15 +116,13 @@ async def interview_endpoint(websocket: WebSocket):
                             
                             if not user_text:
                                 print("[STT] No speech recognized.")
-                                # 비전 통계도 리셋해야 꼬이지 않음
                                 analyzer.vision.reset_stats() 
                                 continue
 
                             print(f"[User]: {user_text}")
                             await websocket.send_json({"type": "user_text", "data": user_text})
 
-                            # 2. [Updated] 멀티모달 분석 요청
-                            # captured_frames 인자 제거됨
+                            # 2. 멀티모달 분석
                             print(f"[Vision] Flushing accumulated stats...")
                             analysis_task = asyncio.create_task(
                                 analyzer.analyze_turn(
@@ -145,7 +156,7 @@ async def interview_endpoint(websocket: WebSocket):
                                 for audio_chunk in audio_stream:
                                     await websocket.send_bytes(audio_chunk)
 
-                            # 4. 분석 결과 전송
+                            # 4. 분석 결과
                             analysis_result = await analysis_task
                             print(f"[Analysis Done] Send to Client")
                             await websocket.send_json({
@@ -169,7 +180,6 @@ async def interview_endpoint(websocket: WebSocket):
                         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                         
                         if frame is not None:
-                            # [핵심] 리스트에 쌓지 않고 즉시 분석기로 전달
                             analyzer.process_vision_frame(frame)
                 except Exception as e:
                     pass
