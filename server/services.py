@@ -120,7 +120,7 @@ class AIOrchestrator:
         1. 답변이 부족하면 꼬리질문을 하세요.
         2. 답변이 충분하면, 아래 [질문 리스트] 중 하나를 자연스럽게 화제를 전환하며 물어보세요.
         3. 대화하듯이 진행하고, 2~3문장 이내로 짧고 간결하게 답변하세요.
-        4. 한국어로 답변하세요. 한자나 히라가나를 출력하지 마세요.
+        4. 한국어로 답변하세요. 한글과 영어를 제외한 문자를 출력하지 마세요.
         5. 문맥상 어색한 단어는 문맥에 맞는 전문용어로 추론하여 내부적으로 해석하세요.
 
         [질문 리스트]
@@ -144,28 +144,31 @@ class AIOrchestrator:
         [LLM2] 턴별 실시간 피드백 생성 (Z-Score 기반 정밀 분석)
         """
         try:
-            # 1. 데이터 추출 (모든 피쳐 확보)
+            # 1. 데이터 추출
             features = analysis_result.get("multimodal_features", {})
             
             # (A) Audio Features
             audio = features.get("audio", {})
-            pitch = audio.get("pitch", {})
+            # pitch = audio.get("pitch", {})  # 제거됨
             intensity = audio.get("intensity", {})
+            F1_Band = audio.get("f1_bandwidth", {}) 
             pause = audio.get("pause_duration", {})
+            unvoiced = audio.get("unvoiced_duration", {}) 
             
             # (B) Video Features
             video = features.get("video", {})
             eye = video.get("eye_contact", {})
             smile = video.get("smile", {})
-            nod = video.get("head_nod", {})
+            # nod = video.get("head_nod", {}) # 제거됨
             
             # (C) Text Features
             text_feat = features.get("text", {})
-            speed = text_feat.get("wpsec", {})
+            wpsec = text_feat.get("wpsec", {}) # Speed
+            upsec = text_feat.get("upsec", {}) # Diversity
             fillers = text_feat.get("fillers", {})
-            diversity = text_feat.get("upsec", {})
+            quantifier = text_feat.get("quantifier", {}) # [New]
 
-            # 2. 시스템 프롬프트 (통계 해석 가이드)
+            # 2. 시스템 프롬프트 
             system_prompt = """
             당신은 데이터 기반의 'AI 면접 코치'입니다. 
             지원자의 [답변]과 [멀티모달 데이터]를 분석하여, 즉시 교정해야 할 점을 1~2문장으로 조언하세요.
@@ -174,45 +177,48 @@ class AIOrchestrator:
             제공되는 수치는 Z-Score(표준점수)를 포함합니다. Z-Score가 ±1.0을 벗어나면 '평균과 다름'을 의미하므로 주의 깊게 보십시오.
             
             1. 오디오 (Audio)
-            - Pitch (음높이): Z > 1.5 (너무 높음/긴장), Z < -1.5 (너무 낮음/침울)
-            - Intensity (음량): Z < -1.0 (목소리 작음/자신감 부족)
-            -Pause (침묵): Z > 1.5 (답변 지연/답답함) 
+            - Intensity (음량): Z < -0.91 → 목소리 작음, 자신감 부족 (감점) 상관계수 : (0.06, 0.08)
+            - F1 Bandwidth (명료도): Z > 5.99 → 발성 긴장 (감점) 상관계수 : (-0.11, -0.12)
+            - Pause Duration (침묵): Z > 13.17 → 답변 지연, 망설임 (감점) 상관계수 : (-0.09, -0.09)
+            - Unvoiced Rate (무성음 비율): Z > 6.39 → 발음 불명확 (감점) 상관계수 : (-0.08, -0.11)
 
             2. 비전 (Video)
-            - Eye Contact (시선): Z < -1.0 (시선 회피/불안), 비율 0.6 미만은 경고 대상.
-            - Smile (표정): Z < -1.0 (표정 굳음), 적절한 미소는 긍정적.
-            - Nod (끄덕임): 경청 태도 지표. (발화 중에는 강조 제스처로 해석)
+            - Eye Contact (시선): Z < -3.66 → 시선 회피 (감점) 상관계수 : (0.08, 0.08)
+            - Smile (표정): Z < -1.34 → 표정 굳음 (감점), Z > -0.92 (부자연스러움) 상관계수 : (0.08, 0.1)
 
             3. 텍스트 (Text)
-            - Speed (속도): Z > 1.5 (너무 빠름), Z < -1.5 (너무 느림)
-            - Fillers (추임새): "음, 어, 그" 빈도. Z > 1.0이면 지적 필요.
-            - Diversity (어휘 다양성): 낮으면 단조로운 표현 반복.
+            - WPSEC (말하기 속도): Z > 0.48 (빠름/긴장), Z < -4.60 (느림/자신감 부족) 상관계수 : (0.1, 0.13)
+            - UPSEC (어휘 다양성): Z < -4.18 → 단조로운 표현 반복 (감점) 상관계수 : (0.08, 0.1)
+            - Fillers ("음, 어, 그" 빈도): Z > -0.49 → 추임새 많음 (감점) 상관계수 : (-0.08, -0.12)
+            - Quantifiers (수치 언급): Z < -5.71 (구체성 부족), Z > 10.09 (숫자만 나열) 상관계수 : (0.09, 0.08)
 
             [작성 규칙]
-            - Z-Score가 튀는 항목(±1.5 이상)을 우선적으로 지적하세요.
+            - 상관계수 합의 절대값이 큰 feature의 z-score값이 튀는 경우를 가장 먼저 지적하세요
+            - Z-Score가 튀는 항목(제시된 기준값을 넘어가는 상황)을 지적하세요.
             - 모든 수치가 정상 범위라면 "태도가 안정적입니다. 지금처럼 답변하세요."라고 칭찬하세요.
             - 말투는 "해요체"로 정중하지만 단호하게 코칭하세요.
             """
             
-            # 3. 사용자 프롬프트 (데이터 주입)
+            # 3. 사용자 프롬프트 
             user_prompt = f"""
             [지원자 답변]: "{user_text}"
             
             [분석 데이터]
             1. Audio
-            - Pitch: {pitch.get('value', 0)}Hz (Z: {pitch.get('z_score', 0)})
-            - Volume: {intensity.get('value', 0)}dB (Z: {intensity.get('z_score', 0)})
-            - Pause: {pause.get('value', 0)}s (Z: {pause.get('z_score', 0)})
+            - Intensity: {intensity.get('value', 0)}dB (Z: {intensity.get('z_score', 0)})
+            - F1 Bandwidth: {F1_Band.get('value', 0)}Hz (Z: {F1_Band.get('z_score', 0)})
+            - Pause Duration: {pause.get('value', 0)}s (Z: {pause.get('z_score', 0)})
+            - Unvoiced Rate: {unvoiced.get('value', 0)}% (Z: {unvoiced.get('z_score', 0)})
             
             2. Video
             - Eye Contact: {eye.get('value', 0)} (Z: {eye.get('z_score', 0)})
             - Smile: {smile.get('value', 0)} (Z: {smile.get('z_score', 0)})
-            - Nods: {nod.get('value', 0)} times
             
             3. Text
-            - Speed: {speed.get('value', 0)} wps (Z: {speed.get('z_score', 0)})
+            - WPSEC: {wpsec.get('value', 0)} wps (Z: {wpsec.get('z_score', 0)})
+            - UPSEC: {upsec.get('value', 0)} ups (Z: {upsec.get('z_score', 0)})
             - Fillers: {fillers.get('value', 0)} count/sec (Z: {fillers.get('z_score', 0)})
-            - Vocabulary: {diversity.get('value', 0)} ups (Z: {diversity.get('z_score', 0)})
+            - Quantifiers: {quantifier.get('value', 0)} ratio (Z: {quantifier.get('z_score', 0)})
             """
 
             # 4. LLM 호출

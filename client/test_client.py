@@ -158,7 +158,7 @@ async def run_client():
                                 audio = features.get('audio', {})
                                 if audio and "error" not in audio:
                                     print("   [Audio]")
-                                    print(f"      - Pitch:       {audio.get('pitch', {}).get('value')} Hz\t(Z: {audio.get('pitch', {}).get('z_score')})")
+                                    # print(f"      - Pitch:       {audio.get('pitch', {}).get('value')} Hz\t(Z: {audio.get('pitch', {}).get('z_score')})")
                                     print(f"      - Intensity:      {audio.get('intensity', {}).get('value')} dB\t(Z: {audio.get('intensity', {}).get('z_score')})")
                                     print(f"      - F1-Bandwidth:     {audio.get('f1_bandwidth', {}).get('value')} Hz\t(Z: {audio.get('f1_bandwidth', {}).get('z_score')})")
                                     print(f"      - Pause Duration:       {audio.get('pause_duration', {}).get('value')} sec\t(Z: {audio.get('pause_duration', {}).get('z_score')})")
@@ -189,7 +189,7 @@ async def run_client():
                                     print("   [Vision]")
                                     print(f"      - Eye Contact: {video.get('eye_contact', {}).get('value')} ratio\t(Z: {video.get('eye_contact', {}).get('z_score')})")
                                     print(f"      - Smile:       {video.get('smile', {}).get('value')} score\t(Z: {video.get('smile', {}).get('z_score')})")
-                                    print(f"      - Nods:        {video.get('head_nod', {}).get('value')} times")
+                                    # print(f"      - Nods:        {video.get('head_nod', {}).get('value')} times")
                                     
                         except json.JSONDecodeError:
                             print(f"[Raw Text]: {message}")
