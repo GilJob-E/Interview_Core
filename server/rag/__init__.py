@@ -2,7 +2,7 @@
 Interview RAG System
 LangChain-based Retrieval Augmented Generation for interview question generation
 """
-from typing import Optional, Iterator, List
+from typing import Optional, Iterator, List, Tuple, Dict, Any, AsyncIterator
 from pathlib import Path
 
 from .vectorstore import load_vectorstore, index_exists, DEFAULT_INDEX_PATH
@@ -189,6 +189,85 @@ class RAGSystem:
             })
 
         return results
+
+    async def generate_hybrid(
+        self,
+        user_text: str,
+        occupation: Optional[str] = None,
+        experience: Optional[str] = None,
+        context_threshold: float = 0.35
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Hybrid RAG 생성 - 컨텍스트 참조율 기반 응답 선택
+
+        RAG와 non-RAG를 병렬 실행 후, 컨텍스트 참조율이 임계값 이상이면
+        RAG 응답을, 그렇지 않으면 non-RAG 응답을 반환합니다.
+
+        Args:
+            user_text: 사용자 입력 (면접 답변)
+            occupation: 직업군 필터 (예: "ICT", "BM")
+            experience: 경력 필터 (예: "EXPERIENCED", "NEW")
+            context_threshold: 컨텍스트 참조 임계값 (기본 0.35)
+
+        Returns:
+            (response, metadata) - 선택된 응답 및 메타데이터
+        """
+        from .async_chain import HybridRAGGenerator
+        from .vectorstore import get_embeddings
+
+        # 임베딩 모델 가져오기 (의미적 유사도 계산용)
+        embedding_model = get_embeddings()
+
+        generator = HybridRAGGenerator(
+            vectorstore=self.vectorstore,
+            k=self.k,
+            model=self.model,
+            temperature=self.temperature,
+            context_threshold=context_threshold,
+            embedding_model=embedding_model
+        )
+
+        return await generator.generate_hybrid(user_text, occupation, experience)
+
+    async def stream_hybrid(
+        self,
+        user_text: str,
+        occupation: Optional[str] = None,
+        experience: Optional[str] = None,
+        context_threshold: float = 0.35
+    ) -> AsyncIterator[Tuple[str, Optional[Dict[str, Any]]]]:
+        """
+        Hybrid RAG 스트리밍 - 컨텍스트 참조율 기반 응답 선택
+
+        마지막 청크에만 메타데이터가 포함됩니다.
+
+        Args:
+            user_text: 사용자 입력 (면접 답변)
+            occupation: 직업군 필터
+            experience: 경력 필터
+            context_threshold: 컨텍스트 참조 임계값 (기본 0.35)
+
+        Yields:
+            (chunk, metadata) - 텍스트 청크와 메타데이터 (마지막만)
+        """
+        from .async_chain import HybridRAGGenerator
+        from .vectorstore import get_embeddings
+
+        embedding_model = get_embeddings()
+
+        generator = HybridRAGGenerator(
+            vectorstore=self.vectorstore,
+            k=self.k,
+            model=self.model,
+            temperature=self.temperature,
+            context_threshold=context_threshold,
+            embedding_model=embedding_model
+        )
+
+        async for chunk, metadata in generator.stream_hybrid(
+            user_text, occupation, experience
+        ):
+            yield chunk, metadata
 
 
 # 편의를 위한 전역 인스턴스 (lazy initialization)

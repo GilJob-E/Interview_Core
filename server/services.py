@@ -1,6 +1,6 @@
 import os
 import io
-from typing import Optional, Iterator
+from typing import Optional, Iterator, Tuple, Dict, Any, AsyncIterator
 import numpy as np
 import soundfile as sf  # [New] numpy -> wav 변환용
 from groq import Groq
@@ -154,6 +154,109 @@ class AIOrchestrator:
             for chunk in response:
                 if chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
+
+    async def generate_llm_response_hybrid(
+        self,
+        user_text: str,
+        occupation: Optional[str] = None,
+        experience: Optional[str] = None,
+        context_threshold: float = 0.35
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Hybrid LLM 응답 생성 - RAG/non-RAG 자동 선택
+
+        RAG와 non-RAG를 병렬 실행 후, 컨텍스트 참조율이 임계값 이상이면
+        RAG 응답을, 그렇지 않으면 non-RAG 응답을 반환합니다.
+
+        Args:
+            user_text: 사용자 입력 (면접 답변)
+            occupation: 직업군 필터 (예: "ICT", "BM")
+            experience: 경력 필터 (예: "EXPERIENCED", "NEW")
+            context_threshold: 컨텍스트 참조 임계값 (기본 0.35)
+
+        Returns:
+            (response, metadata) - 선택된 응답 및 메타데이터
+        """
+        if self.use_rag and self.rag_system:
+            response, metadata = await self.rag_system.generate_hybrid(
+                user_text,
+                occupation=occupation,
+                experience=experience,
+                context_threshold=context_threshold
+            )
+
+            # 로깅
+            print(f"[Hybrid] Selected: {metadata['source']} "
+                  f"(score: {metadata['context_score']:.3f}, "
+                  f"threshold: {metadata['threshold']})")
+
+            return response, metadata
+        else:
+            # RAG 비활성화 시 기존 방식으로 응답 생성
+            print("[Hybrid] RAG disabled, generating non-RAG response")
+            response = self._generate_no_rag_response_sync(user_text)
+            return response, {"source": "non-RAG", "reason": "RAG disabled"}
+
+    def _generate_no_rag_response_sync(self, user_text: str) -> str:
+        """
+        non-RAG 응답 생성 (동기, RAG 비활성화 시 사용)
+
+        Args:
+            user_text: 사용자 입력
+
+        Returns:
+            생성된 응답 텍스트
+        """
+        model_id = "llama-3.3-70b-versatile"
+        system_prompt = (
+            "당신은 친절하지만 날카로운 면접관입니다. "
+            "지원자의 답변을 듣고 꼬리질문을 하거나 한국어로 피드백을 주세요. "
+            "답변은 구어체로 짧고 간결하게(2~3문장 이내) 하세요."
+        )
+        response = self.groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text},
+            ],
+            model=model_id,
+            stream=False,
+            max_tokens=500
+        )
+        return response.choices[0].message.content
+
+    async def stream_llm_response_hybrid(
+        self,
+        user_text: str,
+        occupation: Optional[str] = None,
+        experience: Optional[str] = None,
+        context_threshold: float = 0.35
+    ) -> AsyncIterator[Tuple[str, Optional[Dict[str, Any]]]]:
+        """
+        Hybrid LLM 응답 스트리밍 - RAG/non-RAG 자동 선택
+
+        마지막 청크에만 메타데이터가 포함됩니다.
+
+        Args:
+            user_text: 사용자 입력
+            occupation: 직업군 필터
+            experience: 경력 필터
+            context_threshold: 컨텍스트 참조 임계값
+
+        Yields:
+            (chunk, metadata) - 텍스트 청크와 메타데이터 (마지막만)
+        """
+        if self.use_rag and self.rag_system:
+            async for chunk, metadata in self.rag_system.stream_hybrid(
+                user_text,
+                occupation=occupation,
+                experience=experience,
+                context_threshold=context_threshold
+            ):
+                yield chunk, metadata
+        else:
+            # RAG 비활성화 시
+            response = self._generate_no_rag_response_sync(user_text)
+            yield response, {"source": "non-RAG", "reason": "RAG disabled"}
 
     def generate_llm_response_legacy(self, user_text: str):
         """

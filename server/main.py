@@ -20,14 +20,14 @@ async def interview_endpoint(websocket: WebSocket):
     try:
         # VAD Variables
         audio_buffer = bytearray()
-        pre_speech_buffer = deque(maxlen=3) 
+        pre_speech_buffer = deque(maxlen=5) 
         
         silence_start_time = 0
         is_speaking = False
         SILENCE_THRESHOLD = 0.03 
         
         # [수정 1] 기본 상수 (Base Values)
-        BASE_MIN_PAUSE = 0.8  # 단답형은 더 빨리 반응하도록 낮춤 (0.8초)
+        BASE_MIN_PAUSE = 1.2  # 중간 끊김 방지를 위해 상향 (0.8 → 1.2초)
         BASE_MAX_PAUSE = 2.5  # 기본 최대 대기
         
         checked_intermediate = False
@@ -132,25 +132,29 @@ async def interview_endpoint(websocket: WebSocket):
                                 )
                             )
 
-                            # 3. LLM & TTS
-                            llm_stream = ai_engine.generate_llm_response(user_text)
+                            # 3. LLM & TTS (Hybrid RAG - threshold 0.35 적용)
                             buffer = ""
                             print("[TTS] Streaming Start...")
 
                             MAX_TTS_LENGTH = 1000  # TTS 최대 문자 수
                             total_length = 0
+                            hybrid_metadata = None
 
-                            for token in llm_stream:
-                                if token:
-                                    buffer += token
-                                    total_length += len(token)
+                            async for chunk, metadata in ai_engine.stream_llm_response_hybrid(
+                                user_text,
+                                occupation=None,
+                                experience=None
+                            ):
+                                if chunk:
+                                    buffer += chunk
+                                    total_length += len(chunk)
 
                                     # 무한 반복 감지: 총 길이 초과 시 중단
                                     if total_length > MAX_TTS_LENGTH:
                                         print(f"[Warning] Response too long ({total_length}), truncating...")
                                         break
 
-                                    if any(punct in token for punct in [".", "?", "!", "\n"]):
+                                    if any(punct in chunk for punct in [".", "?", "!", "\n"]):
                                         sentence = buffer.strip()
                                         if sentence:
                                             await websocket.send_json({"type": "ai_text", "data": sentence})
@@ -158,6 +162,16 @@ async def interview_endpoint(websocket: WebSocket):
                                             for audio_chunk in audio_stream:
                                                 await websocket.send_bytes(audio_chunk)
                                         buffer = ""
+
+                                # 마지막 청크에만 메타데이터 포함
+                                if metadata:
+                                    hybrid_metadata = metadata
+
+                            # Hybrid 선택 결과 로깅
+                            if hybrid_metadata:
+                                print(f"[Hybrid] Source: {hybrid_metadata['source']}, "
+                                      f"Score: {hybrid_metadata['context_score']:.3f}, "
+                                      f"Threshold: {hybrid_metadata['threshold']}")
 
                             if buffer.strip() and len(buffer.strip()) <= MAX_TTS_LENGTH:
                                 print(f"   -> TTS Generating (Rem): {buffer.strip()}")

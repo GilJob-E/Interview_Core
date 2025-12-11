@@ -12,14 +12,24 @@ from langchain_core.documents import Document
 from langchain_community.vectorstores import FAISS
 
 
-# 시스템 프롬프트 템플릿
+# 시스템 프롬프트 템플릿 (RAG용 - 컨텍스트 포함)
 SYSTEM_PROMPT_TEMPLATE = """당신은 친절하지만 날카로운 면접관입니다.
 
-아래는 유사한 면접 질문 예시들입니다:
+다음은 지원자의 답변과 관련된 면접 질문-답변 예시입니다:
 
 {context}
 
-위 예시를 참고하여, 지원자의 답변에 대해 꼬리질문을 하거나 피드백을 주세요.
+[중요 지침]
+1. 위 예시에서 언급된 키워드나 주제를 반드시 활용하세요
+2. 예시의 질문 패턴이나 표현을 참고하여 꼬리질문을 생성하세요
+3. 지원자가 언급한 기술/경험과 예시를 연결지어 질문하세요
+
+답변은 구어체로 짧고 간결하게(2~3문장 이내) 하세요."""
+
+
+# 시스템 프롬프트 템플릿 (non-RAG용 - 컨텍스트 없음)
+NO_RAG_SYSTEM_PROMPT = """당신은 친절하지만 날카로운 면접관입니다.
+지원자의 답변에 대해 꼬리질문을 하거나 피드백을 주세요.
 답변은 구어체로 짧고 간결하게(2~3문장 이내) 하세요."""
 
 
@@ -38,11 +48,13 @@ def format_docs(docs: List[Document]) -> str:
         occupation = doc.metadata.get('occupation', 'N/A')
         experience = doc.metadata.get('experience', 'N/A')
         question = doc.metadata.get('question', doc.page_content)
+        answer_summary = doc.metadata.get('answer_summary', '')
 
-        formatted.append(
-            f"[예시 {i}] ({occupation}/{experience})\n"
-            f"질문: {question}"
-        )
+        entry = f"[예시 {i}] ({occupation}/{experience})\n질문: {question}"
+        if answer_summary:
+            entry += f"\n핵심포인트: {answer_summary}"
+
+        formatted.append(entry)
 
     return "\n\n".join(formatted)
 
@@ -207,3 +219,43 @@ def stream_response(
     """
     for chunk in chain.stream(user_text):
         yield chunk
+
+
+def create_no_rag_chain(
+    model: str = "llama-3.3-70b-versatile",
+    temperature: float = 0.7
+):
+    """
+    RAG 없이 LLM만으로 응답 생성하는 체인
+
+    Args:
+        model: 사용할 Groq 모델
+        temperature: LLM temperature
+
+    Returns:
+        LangChain 체인
+    """
+    # LLM 설정
+    llm = ChatGroq(
+        model=model,
+        api_key=os.getenv("GROQ_API_KEY"),
+        temperature=temperature,
+        streaming=False,  # 평가용이므로 스트리밍 비활성화
+        max_tokens=500
+    )
+
+    # 프롬프트 템플릿 (컨텍스트 없음)
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", NO_RAG_SYSTEM_PROMPT),
+        ("human", "{question}")
+    ])
+
+    # 체인 구성
+    chain = (
+        {"question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+
+    return chain
