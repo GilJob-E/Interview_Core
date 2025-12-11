@@ -1,0 +1,63 @@
+# === Core Server ===
+fastapi==0.122.0
+uvicorn==0.38.0
+websockets==15.0.1
+python-dotenv==1.2.1
+pydantic==2.12.5
+
+# === STT (Speech-to-Text) ===
+faster-whisper==1.2.1
+ctranslate2==4.6.1
+
+# === LLM ===
+groq==0.36.0
+
+# === TTS (Text-to-Speech) ===
+elevenlabs==2.24.0
+
+# === RAG System ===
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-core>=0.3.0
+langchain-groq>=0.2.0
+langchain-huggingface>=0.1.0
+faiss-cpu>=1.7.0
+sentence-transformers>=2.2.0
+
+# === Audio Processing ===
+soundfile==0.13.1
+sounddevice==0.5.3
+librosa==0.11.0
+praat-parselmouth==0.4.7
+audioread==3.1.0
+
+# === Vision / MediaPipe ===
+opencv-python==4.12.0.88
+opencv-contrib-python==4.12.0.88
+mediapipe==0.10.21
+pillow==12.0.0
+
+# === NLP (Korean) ===
+kiwipiepy==0.22.1
+kiwipiepy-model==0.22.0
+ko-liwc==0.1.0
+
+# === Scientific Computing ===
+numpy==2.2.6
+scipy==1.15.3
+scikit-learn==1.7.2
+matplotlib==3.10.7
+
+# === Utilities ===
+tqdm==4.67.1
+httpx==0.28.1
+requests==2.32.5
+pyyaml==6.0.3
+coloredlogs==15.0.1
+rich==14.2.0
+
+# === ML Runtime ===
+onnxruntime==1.23.2
+tokenizers==0.22.1
+huggingface-hub==1.1.6
+protobuf==4.25.8
