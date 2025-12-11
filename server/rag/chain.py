@@ -12,25 +12,41 @@ from langchain_core.documents import Document
 from langchain_community.vectorstores import FAISS
 
 
-# 시스템 프롬프트 템플릿 (RAG용 - 컨텍스트 포함)
-SYSTEM_PROMPT_TEMPLATE = """당신은 친절하지만 날카로운 면접관입니다.
+# 시스템 프롬프트 템플릿 (RAG용 - Main 스타일 + 컨텍스트)
+SYSTEM_PROMPT_TEMPLATE = """당신은 베테랑 면접관이자 업계의 시니어입니다.
+지원자의 답변에 대해 자연스럽게 반응하고 대화를 이어가세요.
 
-다음은 지원자의 답변과 관련된 면접 질문-답변 예시입니다:
-
+[참고 예시]
+다음은 유사한 면접 질문-답변 예시입니다. 참고하되 그대로 사용하지 마세요:
 {context}
 
-[중요 지침]
-1. 위 예시에서 언급된 키워드나 주제를 반드시 활용하세요
-2. 예시의 질문 패턴이나 표현을 참고하여 꼬리질문을 생성하세요
-3. 지원자가 언급한 기술/경험과 예시를 연결지어 질문하세요
+[지침]
+1. 위 [참고 예시]의 질문을 기반으로 꼬리질문을 생성하세요.
+2. 답변이 부족하면 꼬리질문을 하세요.
+3. 답변이 충분하면, 아래 [질문 리스트] 중 하나를 자연스럽게 화제를 전환하며 물어보세요.
+4. 대화하듯이 진행하고, 2~3문장 이내로 짧고 간결하게 답변하세요.
+5. 한국어로 답변하세요. 한글과 영어를 제외한 문자를 출력하지 마세요.
+6. 문맥상 어색한 단어는 문맥에 맞는 전문용어로 추론하여 내부적으로 해석하세요.
 
-답변은 구어체로 짧고 간결하게(2~3문장 이내) 하세요."""
+[질문 리스트]
+{questions_list}
+"""
 
 
-# 시스템 프롬프트 템플릿 (non-RAG용 - 컨텍스트 없음)
-NO_RAG_SYSTEM_PROMPT = """당신은 친절하지만 날카로운 면접관입니다.
-지원자의 답변에 대해 꼬리질문을 하거나 피드백을 주세요.
-답변은 구어체로 짧고 간결하게(2~3문장 이내) 하세요."""
+# 시스템 프롬프트 템플릿 (non-RAG용 - Main 스타일, 컨텍스트 없음)
+NO_RAG_SYSTEM_PROMPT = """당신은 베테랑 면접관이자 업계의 시니어입니다.
+지원자의 답변에 대해 자연스럽게 반응하고 대화를 이어가세요.
+
+[지침]
+1. 답변이 부족하면 꼬리질문을 하세요.
+2. 답변이 충분하면, 아래 [질문 리스트] 중 하나를 자연스럽게 화제를 전환하며 물어보세요.
+3. 대화하듯이 진행하고, 2~3문장 이내로 짧고 간결하게 답변하세요.
+4. 한국어로 답변하세요. 한글과 영어를 제외한 문자를 출력하지 마세요.
+5. 문맥상 어색한 단어는 문맥에 맞는 전문용어로 추론하여 내부적으로 해석하세요.
+
+[질문 리스트]
+{questions_list}
+"""
 
 
 def format_docs(docs: List[Document]) -> str:
@@ -98,7 +114,8 @@ def create_rag_chain(
     vectorstore: FAISS,
     k: int = 3,
     model: str = "llama-3.3-70b-versatile",
-    temperature: float = 0.7
+    temperature: float = 0.7,
+    questions_list: Optional[List[str]] = None
 ):
     """
     RAG 체인 생성
@@ -108,6 +125,7 @@ def create_rag_chain(
         k: 검색할 문서 수
         model: 사용할 Groq 모델
         temperature: LLM temperature
+        questions_list: 자소서 기반 질문 리스트
 
     Returns:
         tuple: (chain, retriever)
@@ -124,9 +142,19 @@ def create_rag_chain(
         max_tokens=500  # 무한 반복 방지
     )
 
-    # 프롬프트 템플릿
+    # questions_list 포맷팅
+    q_text = "\n".join([f"- {q}" for q in (questions_list or [])])
+    if not q_text:
+        q_text = "(질문 리스트 없음)"
+
+    # 프롬프트 템플릿 - questions_list를 시스템 프롬프트에 삽입
+    formatted_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        context="{context}",
+        questions_list=q_text
+    )
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT_TEMPLATE),
+        ("system", formatted_system_prompt),
         ("human", "{question}")
     ])
 
@@ -150,7 +178,8 @@ def create_filtered_chain(
     experience: Optional[str] = None,
     k: int = 3,
     model: str = "llama-3.3-70b-versatile",
-    temperature: float = 0.7
+    temperature: float = 0.7,
+    questions_list: Optional[List[str]] = None
 ):
     """
     필터가 적용된 RAG 체인 생성
@@ -162,6 +191,7 @@ def create_filtered_chain(
         k: 검색할 문서 수
         model: 사용할 Groq 모델
         temperature: LLM temperature
+        questions_list: 자소서 기반 질문 리스트
 
     Returns:
         tuple: (chain, retriever)
@@ -183,9 +213,19 @@ def create_filtered_chain(
         max_tokens=500  # 무한 반복 방지
     )
 
-    # 프롬프트 템플릿
+    # questions_list 포맷팅
+    q_text = "\n".join([f"- {q}" for q in (questions_list or [])])
+    if not q_text:
+        q_text = "(질문 리스트 없음)"
+
+    # 프롬프트 템플릿 - questions_list를 시스템 프롬프트에 삽입
+    formatted_system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        context="{context}",
+        questions_list=q_text
+    )
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT_TEMPLATE),
+        ("system", formatted_system_prompt),
         ("human", "{question}")
     ])
 
@@ -223,7 +263,8 @@ def stream_response(
 
 def create_no_rag_chain(
     model: str = "llama-3.3-70b-versatile",
-    temperature: float = 0.7
+    temperature: float = 0.7,
+    questions_list: Optional[List[str]] = None
 ):
     """
     RAG 없이 LLM만으로 응답 생성하는 체인
@@ -231,6 +272,7 @@ def create_no_rag_chain(
     Args:
         model: 사용할 Groq 모델
         temperature: LLM temperature
+        questions_list: 자소서 기반 질문 리스트
 
     Returns:
         LangChain 체인
@@ -244,9 +286,16 @@ def create_no_rag_chain(
         max_tokens=500
     )
 
-    # 프롬프트 템플릿 (컨텍스트 없음)
+    # questions_list 포맷팅
+    q_text = "\n".join([f"- {q}" for q in (questions_list or [])])
+    if not q_text:
+        q_text = "(질문 리스트 없음)"
+
+    # 프롬프트 템플릿 - questions_list를 시스템 프롬프트에 삽입
+    formatted_system_prompt = NO_RAG_SYSTEM_PROMPT.format(questions_list=q_text)
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", NO_RAG_SYSTEM_PROMPT),
+        ("system", formatted_system_prompt),
         ("human", "{question}")
     ])
 

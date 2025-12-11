@@ -193,6 +193,7 @@ class RAGSystem:
     async def generate_hybrid(
         self,
         user_text: str,
+        questions_list: Optional[List[str]] = None,
         occupation: Optional[str] = None,
         experience: Optional[str] = None,
         context_threshold: float = 0.35
@@ -205,6 +206,7 @@ class RAGSystem:
 
         Args:
             user_text: 사용자 입력 (면접 답변)
+            questions_list: 자소서 기반 질문 리스트 (프롬프트에 포함)
             occupation: 직업군 필터 (예: "ICT", "BM")
             experience: 경력 필터 (예: "EXPERIENCED", "NEW")
             context_threshold: 컨텍스트 참조 임계값 (기본 0.35)
@@ -224,7 +226,8 @@ class RAGSystem:
             model=self.model,
             temperature=self.temperature,
             context_threshold=context_threshold,
-            embedding_model=embedding_model
+            embedding_model=embedding_model,
+            questions_list=questions_list
         )
 
         return await generator.generate_hybrid(user_text, occupation, experience)
@@ -232,6 +235,7 @@ class RAGSystem:
     async def stream_hybrid(
         self,
         user_text: str,
+        questions_list: Optional[List[str]] = None,
         occupation: Optional[str] = None,
         experience: Optional[str] = None,
         context_threshold: float = 0.35
@@ -243,6 +247,7 @@ class RAGSystem:
 
         Args:
             user_text: 사용자 입력 (면접 답변)
+            questions_list: 자소서 기반 질문 리스트 (프롬프트에 포함)
             occupation: 직업군 필터
             experience: 경력 필터
             context_threshold: 컨텍스트 참조 임계값 (기본 0.35)
@@ -261,7 +266,8 @@ class RAGSystem:
             model=self.model,
             temperature=self.temperature,
             context_threshold=context_threshold,
-            embedding_model=embedding_model
+            embedding_model=embedding_model,
+            questions_list=questions_list
         )
 
         async for chunk, metadata in generator.stream_hybrid(

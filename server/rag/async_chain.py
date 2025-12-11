@@ -27,7 +27,8 @@ class HybridRAGGenerator:
         model: str = "llama-3.3-70b-versatile",
         temperature: float = 0.7,
         context_threshold: float = 0.35,
-        embedding_model=None
+        embedding_model=None,
+        questions_list: Optional[List[str]] = None
     ):
         """
         Initialize HybridRAGGenerator
@@ -39,18 +40,20 @@ class HybridRAGGenerator:
             temperature: LLM temperature
             context_threshold: Threshold for RAG selection (0~1)
             embedding_model: Optional embedding model for semantic similarity
+            questions_list: 자소서 기반 질문 리스트
         """
         self.vectorstore = vectorstore
         self.k = k
         self.model = model
         self.temperature = temperature
         self.context_threshold = context_threshold
+        self.questions_list = questions_list or []
 
-        # 체인 생성
+        # 체인 생성 - questions_list 전달
         self.rag_chain, self.retriever = create_rag_chain(
-            vectorstore, k, model, temperature
+            vectorstore, k, model, temperature, questions_list=self.questions_list
         )
-        self.no_rag_chain = create_no_rag_chain(model, temperature)
+        self.no_rag_chain = create_no_rag_chain(model, temperature, questions_list=self.questions_list)
 
         # 스코어러 (임베딩 모델 전달)
         self.scorer = ContextScorer(embedding_model=embedding_model)
@@ -80,7 +83,8 @@ class HybridRAGGenerator:
                 experience=experience,
                 k=self.k,
                 model=self.model,
-                temperature=self.temperature
+                temperature=self.temperature,
+                questions_list=self.questions_list
             )
         else:
             rag_chain = self.rag_chain

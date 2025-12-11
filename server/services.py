@@ -1,8 +1,9 @@
 import os
 import io
-from typing import Optional, Iterator, Tuple, Dict, Any, AsyncIterator
+import json  # JSON 데이터 처리용
+from typing import Optional, Tuple, Dict, Any, AsyncIterator
 import numpy as np
-import soundfile as sf  # [New] numpy -> wav 변환용
+import soundfile as sf
 from groq import Groq
 from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
@@ -22,15 +23,14 @@ class AIOrchestrator:
         """
         print("[System] Initializing AI Models (Cloud API Mode)...")
 
-        # 1. STT: Faster-Whisper (Local GPU) -> Groq API (Cloud)
-        print("[STT] Using Groq Whisper API (No Local GPU required).")
+        # 1. STT
+        print("[STT] Using Groq Whisper API.")
 
-        # 2. LLM & STT Client: Groq
-        # Groq 클라이언트 하나로 LLM과 STT 모두 처리
+        # 2. LLM & STT Client
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         print("[LLM/STT] Groq Client Connected.")
 
-        # 3. TTS: ElevenLabs
+        # 3. TTS
         self.tts_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
         print("[TTS] ElevenLabs Client Connected.")
 
@@ -54,43 +54,32 @@ class AIOrchestrator:
                 self.use_rag = False
 
     def transcribe_audio(self, audio_data: np.ndarray):
-        """
-        Numpy Audio Array -> WAV Bytes -> Groq Whisper API -> Text
-        """
         try:
-            # 0. 오디오 정규화 (Normalization)
             max_val = np.max(np.abs(audio_data))
-            if max_val > 0:
-                audio_data = audio_data / max_val
+            if max_val > 0: audio_data = audio_data / max_val
 
-            # 1. Numpy Array를 인메모리 WAV 파일로 변환
-            # Groq API는 파일 객체를 원하므로, 디스크에 쓰지 않고 메모리(Buffer) 사용
             buffer = io.BytesIO()
             sf.write(buffer, audio_data, 16000, format='WAV', subtype='PCM_16')
-            buffer.seek(0) # 파일 포인터를 처음으로 이동
-            
-            # 2. Groq Whisper API 호출
-            # model: whisper-large-v3 (로컬에서 쓰던 것과 동일 모델)
+            buffer.seek(0)
+
             transcription = self.groq_client.audio.transcriptions.create(
-                file=("input.wav", buffer), # (파일명, 파일객체) 튜플
+                file=("input.wav", buffer),
                 model="whisper-large-v3",
-                language="ko",              # 한국어 강제
-                temperature=0.0,            # 결정론적 결과
+                language="ko",
+                temperature=0.0,
                 response_format="json"
             )
-            
-            text = transcription.text.strip()
-            print(f"[Debug] Groq Whisper Output: '{text}'")
 
-            # 3. 환각 필터링 
+            text = transcription.text.strip()
+
             hallucinations = [
-                "Thank you for watching", "MBC News", "자막 제공", 
+                "Thank you for watching", "MBC News", "자막 제공",
                 "시청해주셔서", "수고하셨습니다", "Unidentified", "감사합니다",
             ]
             if any(h.lower() in text.lower() for h in hallucinations):
-                print(f"[Debug] Filtered hallucination: {text}")
                 return ""
-                
+            if len(text) < 1: return ""
+
             return text
 
         except Exception as e:
@@ -110,184 +99,261 @@ class AIOrchestrator:
             if text.endswith(ending): return True
         return False
 
-    def generate_llm_response(
-        self,
-        user_text: str,
-        occupation: Optional[str] = None,
-        experience: Optional[str] = None
-    ) -> Iterator[str]:
-        """
-        LLM 응답 생성 (RAG 또는 기본 모드)
+    # =========================================================================
+    # LLM1-A: 자소서 분석 및 질문 생성 (RAG 미적용)
+    # =========================================================================
+    def analyze_resume_and_generate_questions(self, resume_text: str):
+        system_prompt = """
+        당신은 채용담당자입니다. 지원자의 자기소개서를 분석하여 다음 두 가지를 수행하세요.
 
-        Args:
-            user_text: 사용자 입력 (면접 답변)
-            occupation: 직업군 필터 (예: "ICT", "BM", "SM")
-            experience: 경력 필터 (예: "EXPERIENCED", "NEW")
+        1. [자소서 요약]: 핵심 경험, 주요 역량, 기술 등을 요약하세요.
+        2. [면접 질문 생성]: 지원자의 경험에 기반한 예리한 면접 핵심 질문 3가지를 생성하세요.
 
-        Yields:
-            응답 텍스트 청크 (스트리밍)
+        출력 형식 (JSON):
+        {
+            "summary": "지원자는 ... 경험이 있으며 ... 역량을 보유함.",
+            "questions": [
+                "질문1 : ...",
+                "질문2 : ...",
+                "질문3 : ..."
+            ]
+        }
         """
-        # RAG 모드: 유사한 질문들을 검색하여 컨텍스트로 활용
-        if self.use_rag and self.rag_system:
-            print(f"[RAG] Generating response with RAG (occupation={occupation}, experience={experience})")
-            for chunk in self.rag_system.stream(user_text, occupation, experience):
-                yield chunk
-        else:
-            # 기본 모드: 기존 방식 유지
-            print("[LLM] Generating response without RAG")
-            model_id = "llama-3.3-70b-versatile"
-            system_prompt = (
-                "당신은 친절하지만 날카로운 면접관입니다. "
-                "지원자의 답변을 듣고 꼬리질문을 하거나 한국어로 피드백을 주세요. "
-                "답변은 구어체로 짧고 간결하게(2~3문장 이내) 하세요."
-            )
+
+        try:
             response = self.groq_client.chat.completions.create(
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_text},
+                    {"role": "user", "content": resume_text},
                 ],
-                model=model_id,
-                stream=True,
-                max_tokens=500  # 무한 반복 방지
+                model="llama-3.3-70b-versatile",
+                temperature=0.5,
+                response_format={"type": "json_object"}
             )
-            # Groq API 스트리밍 응답을 텍스트 청크로 변환
-            for chunk in response:
-                if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"[Resume Analysis Error] {e}")
+            return {"summary": "분석 실패", "questions": ["자기소개를 해주세요."]}
 
-    async def generate_llm_response_hybrid(
+    # =========================================================================
+    # LLM1-B: 면접관 응답 - Hybrid RAG 스트리밍
+    # =========================================================================
+    async def stream_interviewer_response_hybrid(
         self,
         user_text: str,
-        occupation: Optional[str] = None,
-        experience: Optional[str] = None,
-        context_threshold: float = 0.35
-    ) -> Tuple[str, Dict[str, Any]]:
-        """
-        Hybrid LLM 응답 생성 - RAG/non-RAG 자동 선택
-
-        RAG와 non-RAG를 병렬 실행 후, 컨텍스트 참조율이 임계값 이상이면
-        RAG 응답을, 그렇지 않으면 non-RAG 응답을 반환합니다.
-
-        Args:
-            user_text: 사용자 입력 (면접 답변)
-            occupation: 직업군 필터 (예: "ICT", "BM")
-            experience: 경력 필터 (예: "EXPERIENCED", "NEW")
-            context_threshold: 컨텍스트 참조 임계값 (기본 0.35)
-
-        Returns:
-            (response, metadata) - 선택된 응답 및 메타데이터
-        """
-        if self.use_rag and self.rag_system:
-            response, metadata = await self.rag_system.generate_hybrid(
-                user_text,
-                occupation=occupation,
-                experience=experience,
-                context_threshold=context_threshold
-            )
-
-            # 로깅
-            print(f"[Hybrid] Selected: {metadata['source']} "
-                  f"(score: {metadata['context_score']:.3f}, "
-                  f"threshold: {metadata['threshold']})")
-
-            return response, metadata
-        else:
-            # RAG 비활성화 시 기존 방식으로 응답 생성
-            print("[Hybrid] RAG disabled, generating non-RAG response")
-            response = self._generate_no_rag_response_sync(user_text)
-            return response, {"source": "non-RAG", "reason": "RAG disabled"}
-
-    def _generate_no_rag_response_sync(self, user_text: str) -> str:
-        """
-        non-RAG 응답 생성 (동기, RAG 비활성화 시 사용)
-
-        Args:
-            user_text: 사용자 입력
-
-        Returns:
-            생성된 응답 텍스트
-        """
-        model_id = "llama-3.3-70b-versatile"
-        system_prompt = (
-            "당신은 친절하지만 날카로운 면접관입니다. "
-            "지원자의 답변을 듣고 꼬리질문을 하거나 한국어로 피드백을 주세요. "
-            "답변은 구어체로 짧고 간결하게(2~3문장 이내) 하세요."
-        )
-        response = self.groq_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_text},
-            ],
-            model=model_id,
-            stream=False,
-            max_tokens=500
-        )
-        return response.choices[0].message.content
-
-    async def stream_llm_response_hybrid(
-        self,
-        user_text: str,
-        occupation: Optional[str] = None,
-        experience: Optional[str] = None,
+        questions_list: list,
         context_threshold: float = 0.35
     ) -> AsyncIterator[Tuple[str, Optional[Dict[str, Any]]]]:
         """
-        Hybrid LLM 응답 스트리밍 - RAG/non-RAG 자동 선택
+        Hybrid RAG 기반 면접관 응답 스트리밍
 
+        RAG 컨텍스트가 유용하면 활용하고, 그렇지 않으면 기본 응답 사용.
         마지막 청크에만 메타데이터가 포함됩니다.
 
         Args:
-            user_text: 사용자 입력
-            occupation: 직업군 필터
-            experience: 경력 필터
-            context_threshold: 컨텍스트 참조 임계값
+            user_text: 지원자 답변
+            questions_list: 자소서 기반 질문 리스트
+            context_threshold: 컨텍스트 참조 임계값 (기본 0.35)
 
         Yields:
             (chunk, metadata) - 텍스트 청크와 메타데이터 (마지막만)
         """
         if self.use_rag and self.rag_system:
+            # Hybrid RAG 스트리밍 사용 (questions_list 전달)
             async for chunk, metadata in self.rag_system.stream_hybrid(
                 user_text,
-                occupation=occupation,
-                experience=experience,
+                questions_list=questions_list,
+                occupation=None,
+                experience=None,
                 context_threshold=context_threshold
             ):
                 yield chunk, metadata
         else:
-            # RAG 비활성화 시
-            response = self._generate_no_rag_response_sync(user_text)
-            yield response, {"source": "non-RAG", "reason": "RAG disabled"}
+            # RAG 비활성화 시에도 chain.py의 프롬프트 사용
+            from rag.chain import create_no_rag_chain
 
-    def generate_llm_response_legacy(self, user_text: str):
+            print("[Hybrid] RAG disabled, using chain.py NO_RAG prompt")
+            chain = create_no_rag_chain(questions_list=questions_list)
+            response = chain.invoke(user_text)
+
+            # 청크 단위로 스트리밍 시뮬레이션
+            chunk_size = 5
+            for i in range(0, len(response), chunk_size):
+                yield response[i:i+chunk_size], None
+
+            # 마지막 청크에 메타데이터 포함
+            yield "", {"source": "non-RAG", "reason": "RAG disabled"}
+
+    # =========================================================================
+    # LLM2: 면접 코치 (실시간 피드백) - RAG 미적용
+    # =========================================================================
+    async def generate_instant_feedback(self, user_text: str, analysis_result: dict):
         """
-        기존 LLM 응답 생성 (하위 호환성 유지)
-        main.py에서 기존 방식으로 호출하는 경우를 위해 유지
-
-        Returns:
-            Groq API 스트리밍 응답 객체
+        [LLM2] 턴별 실시간 피드백 생성 (Z-Score 기반 정밀 분석)
         """
-        model_id = "llama-3.3-70b-versatile"
-        system_prompt = (
-            "당신은 친절하지만 날카로운 면접관입니다. "
-            "지원자의 답변을 듣고 꼬리질문을 하거나 한국어로 피드백을 주세요. "
-            "답변은 구어체로 짧고 간결하게(2~3문장 이내) 하세요."
-        )
-        return self.groq_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_text},
-            ],
-            model=model_id,
-            stream=True
-        )
+        try:
+            # 1. 데이터 추출
+            features = analysis_result.get("multimodal_features", {})
 
+            # (A) Audio Features
+            audio = features.get("audio", {})
+            intensity = audio.get("intensity", {})
+            F1_Band = audio.get("f1_bandwidth", {})
+            pause = audio.get("pause_duration", {})
+            unvoiced = audio.get("unvoiced_duration", {})
+
+            # (B) Video Features
+            video = features.get("video", {})
+            eye = video.get("eye_contact", {})
+            smile = video.get("smile", {})
+
+            # (C) Text Features
+            text_feat = features.get("text", {})
+            wpsec = text_feat.get("wpsec", {})
+            upsec = text_feat.get("upsec", {})
+            fillers = text_feat.get("fillers", {})
+            quantifier = text_feat.get("quantifier", {})
+
+            # 2. 시스템 프롬프트
+            system_prompt = """
+            당신은 데이터 기반의 'AI 면접 코치'입니다.
+            지원자의 [답변]과 [멀티모달 데이터]를 분석하여, 즉시 교정해야 할 점을 1~2문장으로 조언하세요.
+
+            [데이터 해석 가이드 (중요)]
+            제공되는 수치는 Z-Score(표준점수)를 포함합니다. Z-Score가 ±1.0을 벗어나면 '평균과 다름'을 의미하므로 주의 깊게 보십시오.
+
+            1. 오디오 (Audio)
+            - Intensity (음량): Z < -0.91 → 목소리 작음, 자신감 부족 (감점) 상관계수 : (0.06, 0.08)
+            - F1 Bandwidth (명료도): Z > 5.99 → 발성 긴장 (감점) 상관계수 : (-0.11, -0.12)
+            - Pause Duration (침묵): Z > 13.17 → 답변 지연, 망설임 (감점) 상관계수 : (-0.09, -0.09)
+            - Unvoiced Rate (무성음 비율): Z > 6.39 → 발음 불명확 (감점) 상관계수 : (-0.08, -0.11)
+
+            2. 비전 (Video)
+            - Eye Contact (시선): Z < -3.66 → 시선 회피 (감점) 상관계수 : (0.08, 0.08)
+            - Smile (표정): Z < -1.34 → 표정 굳음 (감점), Z > -0.92 (부자연스러움) 상관계수 : (0.08, 0.1)
+
+            3. 텍스트 (Text)
+            - WPSEC (말하기 속도): Z > 0.48 (빠름/긴장), Z < -4.60 (느림/자신감 부족) 상관계수 : (0.1, 0.13)
+            - UPSEC (어휘 다양성): Z < -4.18 → 단조로운 표현 반복 (감점) 상관계수 : (0.08, 0.1)
+            - Fillers ("음, 어, 그" 빈도): Z > -0.49 → 추임새 많음 (감점) 상관계수 : (-0.08, -0.12)
+            - Quantifiers (수치 언급): Z < -5.71 (구체성 부족), Z > 10.09 (숫자만 나열) 상관계수 : (0.09, 0.08)
+
+            [작성 규칙]
+            - 상관계수 합의 절대값이 큰 feature의 z-score값이 튀는 경우를 가장 먼저 지적하세요
+            - Z-Score가 튀는 항목(제시된 기준값을 넘어가는 상황)을 지적하세요.
+            - 모든 수치가 정상 범위라면 "태도가 안정적입니다. 지금처럼 답변하세요."라고 칭찬하세요.
+            - 말투는 "해요체"로 정중하지만 단호하게 코칭하세요.
+            """
+
+            # 3. 사용자 프롬프트
+            user_prompt = f"""
+            [지원자 답변]: "{user_text}"
+
+            [분석 데이터]
+            1. Audio
+            - Intensity: {intensity.get('value', 0)}dB (Z: {intensity.get('z_score', 0)})
+            - F1 Bandwidth: {F1_Band.get('value', 0)}Hz (Z: {F1_Band.get('z_score', 0)})
+            - Pause Duration: {pause.get('value', 0)}s (Z: {pause.get('z_score', 0)})
+            - Unvoiced Rate: {unvoiced.get('value', 0)}% (Z: {unvoiced.get('z_score', 0)})
+
+            2. Video
+            - Eye Contact: {eye.get('value', 0)} (Z: {eye.get('z_score', 0)})
+            - Smile: {smile.get('value', 0)} (Z: {smile.get('z_score', 0)})
+
+            3. Text
+            - WPSEC: {wpsec.get('value', 0)} wps (Z: {wpsec.get('z_score', 0)})
+            - UPSEC: {upsec.get('value', 0)} ups (Z: {upsec.get('z_score', 0)})
+            - Fillers: {fillers.get('value', 0)} count/sec (Z: {fillers.get('z_score', 0)})
+            - Quantifiers: {quantifier.get('value', 0)} ratio (Z: {quantifier.get('z_score', 0)})
+            """
+
+            # 4. LLM 호출
+            response = self.groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.6,
+                max_tokens=150
+            )
+
+            return response.choices[0].message.content
+
+        except Exception as e:
+            print(f"[Coach Error] {e}")
+            return "피드백 생성 중 오류가 발생했습니다."
+
+    # =========================================================================
+    # LLM3: 최종 리포트 생성 - RAG 미적용
+    # =========================================================================
+    async def generate_final_report(self, interview_history: list):
+        """
+        [LLM3] 면접 종료 후 종합 리포트 생성
+        - 입력: 전체 대화 기록 및 턴별 분석 데이터 리스트
+        - 출력: 마크다운 형태의 종합 평가서
+        """
+        try:
+            # 히스토리를 텍스트로 변환
+            history_text = ""
+            for turn in interview_history:
+                history_text += f"""
+                [Turn {turn['turn_id']}]
+                User: {turn['user_text']}
+                AI: {turn['ai_text']}
+                Stats: {json.dumps(turn['stats'])}
+                Coach Feedback: {turn['coach_feedback']}
+                ------------------------------------------------
+                """
+
+            system_prompt = """
+            당신은 베테랑 '면접 전문 코치'입니다.
+            전체 면접 데이터를 분석하여, 지원자에게 도움이 되는 [최종 분석 리포트]를 작성해주세요.
+
+            [작성 양식 (Markdown)]
+            # 📊 면접 종합 리포트
+
+            ## 1. 총평 (100점 만점 점수 포함)
+            - 전체적인 인상과 점수
+
+            ## 2. 강점 (Good Points)
+            - 데이터에 기반한 칭찬 (예: 시선 처리가 안정적임, 목소리 톤이 신뢰감 있음)
+
+            ## 3. 개선할 점 (Weak Points)
+            - 구체적인 데이터 근거 (예: Turn 3에서 말이 빨라짐, 답변이 두서없음)
+
+            ## 4. Action Plan
+            - 다음 면접을 위해 구체적으로 연습해야 할 점
+            """
+
+            response = self.groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": history_text},
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.6,
+                max_tokens=1000
+            )
+
+            return response.choices[0].message.content
+
+        except Exception as e:
+            print(f"[Report Error] {e}")
+            return "리포트 생성 중 오류가 발생했습니다."
+
+    # =========================================================================
+    # TTS: 텍스트 → 음성 변환
+    # =========================================================================
     def text_to_speech_stream(self, text: str):
         if not text or not isinstance(text, str) or len(text.strip()) == 0:
             return []
-        audio_stream = self.tts_client.text_to_speech.convert(
-            voice_id="JBFqnCBsd6RMkjVDRZzb",
-            output_format="pcm_16000", 
-            text=text,
-            model_id="eleven_turbo_v2_5"
-        )
-        return audio_stream
+        try:
+            audio_stream = self.tts_client.text_to_speech.convert(
+                voice_id="JBFqnCBsd6RMkjVDRZzb",
+                output_format="pcm_16000",
+                text=text,
+                model_id="eleven_turbo_v2_5"
+            )
+            return audio_stream
+        except: return []
