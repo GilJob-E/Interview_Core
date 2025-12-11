@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QTextEdit, QPushButton, QLabel, QStackedWidget, QGridLayout, 
     QProgressBar, QSpinBox, QFrame, QSizePolicy, QStackedLayout,
-    QFileDialog, QScrollArea
+    QFileDialog, QScrollArea, QRadioButton, QButtonGroup
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
 from PyQt6.QtGui import QImage, QPixmap
@@ -118,6 +118,25 @@ GLOBAL_STYLE = """
         text-align: center;
         color: transparent;
     }
+    QRadioButton {
+        color: #E2E8F0;
+        font-size: 16px;
+        padding: 5px;
+    }
+    QRadioButton::indicator {
+        width: 18px;
+        height: 18px;
+    }
+    QRadioButton::indicator::checked {
+        background-color: #5D5FEF;
+        border: 2px solid #E2E8F0;
+        border-radius: 9px;
+    }
+    QRadioButton::indicator::unchecked {
+        background-color: #2D3748;
+        border: 2px solid #4A5568;
+        border-radius: 9px;
+    }
     QLabel.Title {
         color: white;
         font-size: 26px;
@@ -127,7 +146,6 @@ GLOBAL_STYLE = """
         color: #A0AEC0;
         font-size: 14px;
     }
-    
     QScrollBar:vertical {
         border: none;
         background: #2D3748;
@@ -145,9 +163,6 @@ GLOBAL_STYLE = """
 """
 
 class WebcamFeedbackWidget(QWidget):
-    """
-    순수하게 웹캠 영상만 표시하는 위젯
-    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(FRAME_WIDTH, FRAME_HEIGHT)
@@ -171,16 +186,22 @@ class WebcamFeedbackWidget(QWidget):
 
 class FeedbackDisplayWidget(QWidget):
     """
-    피드백 표시 전용 위젯 (스크롤 + 히스토리 탐색)
+    [수정 사항]
+    - feedback_mode에 따른 카운터 표시(/2) 및 내비게이션 스텝(2칸) 로직 적용
+    - 배경색 불투명 설정 및 마우스 이벤트 처리
     """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(FRAME_WIDTH)
         self.setMaximumHeight(200) 
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        
+        # [NEW] 모드 상태 저장 (Default=True)
+        self.is_default_mode = True 
         
         self.setStyleSheet("""
             FeedbackDisplayWidget {
-                background-color: rgba(0, 0, 0, 0.85);
+                background-color: rgba(15, 15, 20, 0.98);
                 border-radius: 10px;
                 border-left: 4px solid #FFD700;
             }
@@ -188,9 +209,10 @@ class FeedbackDisplayWidget(QWidget):
                 color: #A0AEC0;
                 font-weight: bold;
                 background: transparent;
+                border: none;
             }
             QPushButton {
-                background-color: transparent;
+                background-color: #2D3748;
                 color: #E2E8F0;
                 font-weight: bold;
                 font-size: 16px;
@@ -202,6 +224,7 @@ class FeedbackDisplayWidget(QWidget):
                 background-color: #4A5568;
             }
             QPushButton:disabled {
+                background-color: #1A202C;
                 color: #4A5568;
                 border: 1px solid #2D3748;
             }
@@ -211,6 +234,7 @@ class FeedbackDisplayWidget(QWidget):
                 color: #FFD700;
                 font-size: 14px;
                 font-weight: bold;
+                selection-background-color: #5D5FEF;
             }
         """)
 
@@ -218,10 +242,10 @@ class FeedbackDisplayWidget(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(5)
 
-        # 상단 내비게이션 바
         nav_layout = QHBoxLayout()
         self.btn_prev = QPushButton("◀")
         self.btn_prev.setFixedSize(30, 25)
+        self.btn_prev.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_prev.clicked.connect(self.show_prev)
         
         self.lbl_counter = QLabel("0/0")
@@ -229,13 +253,13 @@ class FeedbackDisplayWidget(QWidget):
         
         self.btn_next = QPushButton("▶")
         self.btn_next.setFixedSize(30, 25)
+        self.btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_next.clicked.connect(self.show_next)
 
         nav_layout.addWidget(self.btn_prev)
         nav_layout.addWidget(self.lbl_counter)
         nav_layout.addWidget(self.btn_next)
         
-        # 텍스트 영역
         self.text_view = QTextEdit()
         self.text_view.setReadOnly(True)
         self.text_view.setMinimumHeight(80) 
@@ -247,6 +271,11 @@ class FeedbackDisplayWidget(QWidget):
         self.current_index = -1
         self.refresh_ui()
 
+    def set_mode(self, is_default):
+        """[NEW] 외부에서 모드 변경 시 호출"""
+        self.is_default_mode = is_default
+        self.refresh_ui()
+
     def add_feedback(self, text):
         self.history.append(text)
         self.current_index = len(self.history) - 1
@@ -254,13 +283,23 @@ class FeedbackDisplayWidget(QWidget):
         self.show()
 
     def show_prev(self):
-        if self.current_index > 0:
-            self.current_index -= 1
+        # [NEW] Default Mode면 2칸씩, 아니면 1칸씩 이동
+        step = 2 if self.is_default_mode else 1
+        
+        if self.current_index - step >= 0:
+            self.current_index -= step
+            self.refresh_ui()
+        elif self.current_index > 0 and self.is_default_mode:
+            # 2칸 이동하려는데 1칸밖에 안 남았을 경우 (예외 처리)
+            self.current_index = 0
             self.refresh_ui()
 
     def show_next(self):
-        if self.current_index < len(self.history) - 1:
-            self.current_index += 1
+        # [NEW] Default Mode면 2칸씩, 아니면 1칸씩 이동
+        step = 2 if self.is_default_mode else 1
+        
+        if self.current_index + step < len(self.history):
+            self.current_index += step
             self.refresh_ui()
 
     def refresh_ui(self):
@@ -275,9 +314,29 @@ class FeedbackDisplayWidget(QWidget):
 
         content = self.history[self.current_index]
         self.text_view.setText(f"💡 {content}")
-        self.lbl_counter.setText(f"{self.current_index + 1}/{total}")
-        self.btn_prev.setEnabled(self.current_index > 0)
-        self.btn_next.setEnabled(self.current_index < total - 1)
+        self.text_view.verticalScrollBar().setValue(0)
+        
+        # [NEW] 카운터 표시 로직 분기
+        if self.is_default_mode:
+            # 표시할 때만 2로 나누어 보여줌 (내부 인덱스는 유지)
+            # 예: 내부 0 -> 표시 1, 내부 2 -> 표시 2
+            display_idx = (self.current_index // 2) + 1
+            display_total = max(1, total // 2) # total이 1개일 때 0이 되는 것 방지
+            
+            # 홀수 개수일 때 마지막 하나가 남는 경우 처리 (올림 처리)
+            if total % 2 != 0: 
+                display_total = (total // 2) + 1
+            
+            self.lbl_counter.setText(f"{display_idx}/{display_total}")
+            
+            # 버튼 활성화 체크 (2칸 이동 가능 여부)
+            self.btn_prev.setEnabled(self.current_index >= 2)
+            self.btn_next.setEnabled(self.current_index < total - 2)
+        else:
+            # All Mode: 1:1 표시
+            self.lbl_counter.setText(f"{self.current_index + 1}/{total}")
+            self.btn_prev.setEnabled(self.current_index > 0)
+            self.btn_next.setEnabled(self.current_index < total - 1)
 
 
 class IntroPage(QWidget):
@@ -363,7 +422,7 @@ class InterviewOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # WA_TransparentForMouseEvents 제거 (자식 위젯 이벤트 수신용)
         
         layout = QGridLayout(self)
         layout.setContentsMargins(30, 30, 30, 30)
@@ -376,17 +435,17 @@ class InterviewOverlay(QWidget):
         self.lbl_ai_text.setWordWrap(True)
         self.lbl_ai_text.setMinimumHeight(60)
         self.lbl_ai_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.lbl_ai_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.lbl_ai_text, 0, 0, 1, 12)
 
         layout.setRowStretch(1, 1)
 
-        # 피드백 표시 위젯
         self.feedback_widget = FeedbackDisplayWidget(self)
         self.feedback_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         layout.addWidget(self.feedback_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
 
-        # 웹캠 위젯
         self.webcam_widget = WebcamFeedbackWidget(self)
+        self.webcam_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.webcam_widget, 2, 8, 2, 4, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
 
         self.lbl_user_text = QLabel("")
@@ -396,7 +455,12 @@ class InterviewOverlay(QWidget):
         """)
         self.lbl_user_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_user_text.hide()
+        self.lbl_user_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.lbl_user_text, 4, 1, 1, 10)
+
+    # [NEW] 모드 변경 전달 메서드
+    def set_feedback_mode(self, is_default):
+        self.feedback_widget.set_mode(is_default)
 
     def update_ai_text(self, text): self.lbl_ai_text.setText(text)
     
@@ -428,6 +492,10 @@ class InterviewPage(QWidget):
         self.bg_cap = cv2.VideoCapture("면접관.mp4")
         self.bg_timer = QTimer()
         self.bg_timer.timeout.connect(self.update_background_frame)
+
+    # [NEW] 모드 전달용 메서드
+    def set_feedback_mode(self, is_default):
+        self.overlay.set_feedback_mode(is_default)
 
     def resizeEvent(self, event):
         self.overlay.setGeometry(self.rect())
@@ -522,6 +590,7 @@ class OptionsPage(QWidget):
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(lbl_title)
 
+        # 1. 질문 수 설정
         form_layout = QHBoxLayout()
         form_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_q = QLabel("예상 질문 수 설정")
@@ -534,8 +603,35 @@ class OptionsPage(QWidget):
         form_layout.addSpacing(20)
         form_layout.addWidget(self.spin_questions)
         card_layout.addLayout(form_layout)
-        card_layout.addSpacing(20)
+        
+        # 2. Feedback Mode 설정
+        mode_layout = QVBoxLayout()
+        lbl_mode = QLabel("피드백 모드 설정")
+        lbl_mode.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 5px;")
+        
+        self.rb_default = QRadioButton("Default Mode (권장)")
+        self.rb_default.setChecked(True)
+        self.rb_all = QRadioButton("모든 분석 받기 (All Analysis)")
+        
+        self.bg_mode = QButtonGroup(self)
+        self.bg_mode.addButton(self.rb_default)
+        self.bg_mode.addButton(self.rb_all)
+        
+        mode_container = QWidget()
+        mode_box = QVBoxLayout(mode_container)
+        mode_box.addWidget(lbl_mode)
+        mode_box.addWidget(self.rb_default)
+        mode_box.addWidget(self.rb_all)
+        mode_box.setContentsMargins(0, 10, 0, 10)
+        
+        h_mode = QHBoxLayout()
+        h_mode.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        h_mode.addWidget(mode_container)
+        card_layout.addLayout(h_mode)
 
+        card_layout.addSpacing(10)
+
+        # 3. 마이크 테스트
         self.btn_mic = QPushButton("🎙 마이크 테스트 (누르고 말하기)")
         self.btn_mic.setFixedHeight(60)
         self.btn_mic.setProperty("class", "Secondary")
@@ -562,7 +658,12 @@ class OptionsPage(QWidget):
         self.sig_volume_update.connect(self.update_bar_ui)
 
     def on_back(self):
-        if self.main_window: self.main_window.update_expected_questions(self.spin_questions.value())
+        if self.main_window:
+            self.main_window.update_expected_questions(self.spin_questions.value())
+            # [NEW] 설정값 업데이트 (MainWindow -> InterviewPage -> Overlay -> Widget)
+            is_default_mode = self.rb_default.isChecked()
+            self.main_window.update_feedback_mode(is_default_mode)
+            
         self.go_back.emit()
 
     def audio_callback(self, indata, frames, time, status):
@@ -660,6 +761,7 @@ class MainWindow(QMainWindow):
 
         self.expected_questions = 3
         self.feedback_count = 0 
+        self.feedback_mode = True # Default Mode
         
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -715,6 +817,13 @@ class MainWindow(QMainWindow):
     def update_expected_questions(self, count):
         self.expected_questions = count
         print(f"[Log] Expected Questions Updated: {count}")
+
+    # [NEW] 모드 업데이트 메서드
+    def update_feedback_mode(self, mode: bool):
+        self.feedback_mode = mode
+        # InterviewPage로 즉시 전달
+        self.page_interview.set_feedback_mode(mode)
+        print(f"[Log] Feedback Mode Updated: {'Default' if mode else 'All Analysis'} ({mode})")
 
     def handle_intro_submit(self, text):
         asyncio.create_task(self.send_queue.put(json.dumps({"type": "text", "data": text})))
@@ -891,7 +1000,6 @@ class MainWindow(QMainWindow):
                     elif mtype == "user_text":
                         self.sig_user_text.emit(data)
                         
-                    # [NEW] coach_feedback 처리 (data가 문자열이라고 가정하고 바로 출력)
                     elif mtype == "coach_feedback":
                         self.sig_feedback_realtime.emit(str(data))
                         
@@ -899,15 +1007,12 @@ class MainWindow(QMainWindow):
                         self.feedback_count += 1
                         print(f"[Log] Feedback received. Count: {self.feedback_count} / {self.expected_questions}")
                         
-                        # 기존 코드 유지 (feedback 메시지도 텍스트를 담고 있으면 출력됨)
                         feedback_str = data.get("message", str(data)) if isinstance(data, dict) else str(data)
                         self.sig_feedback_realtime.emit(feedback_str)
                         self._feedback_list.append(data)
                         
                         if self.feedback_count >= self.expected_questions:
                             print("[Log] Final feedback received. Sending finish flag and data to Feedback Page.")
-                            
-                            # [NEW] 면접 종료 Flag 서버 전송
                             await self.send_queue.put(json.dumps({"type": "flag", "data": "finish"}))
                             
                             agg = {"type": "feedback_aggregate", "items": self._feedback_list}
