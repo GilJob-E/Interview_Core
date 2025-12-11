@@ -71,14 +71,62 @@ class AIOrchestrator:
             if text.endswith(ending): return True
         return False
 
-    def generate_llm_response(self, user_text: str):
-        # LLM1: 면접관 (질문 및 대화 진행)
+    # LLM1: 면접관 (자소서 분석 및 질문 생성)
+    def analyze_resume_and_generate_questions(self, resume_text: str):
+        system_prompt = """
+        당신은 채용담당자입니다. 지원자의 자기소개서를 분석하여 다음 두 가지를 수행하세요.
+
+        1. [자소서 요약]: 핵심 경험, 주요 역량, 기술 등을 요약하세요.
+        2. [면접 질문 생성]: 지원자의 경험에 기반한 예리한 면접 핵심 질문 3가지를 생성하세요.
+
+        출력 형식 (JSON):
+        {
+            "summary": "지원자는 ... 경험이 있으며 ... 역량을 보유함.",
+            "questions": [
+                "질문1 : ...",
+                "질문2 : ...",
+                "질문3 : ..."
+            ]
+        }
+        """
+        
+        try:
+            response = self.groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": resume_text},
+                ],
+                model="llama-3.3-70b-versatile",
+                temperature=0.5,
+                response_format={"type": "json_object"} # JSON 강제 출력
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"[Resume Analysis Error] {e}")
+            return {"summary": "분석 실패", "questions": ["자기소개를 해주세요."]}
+
+    # LLM1: 면접관 (질문 및 대화 진행)
+    def generate_llm_response(self, user_text: str, questions_list: list):
         model_id = "llama-3.3-70b-versatile" 
-        system_prompt = (
-            "당신은 친절하지만 날카로운 면접관입니다. "
-            "지원자의 답변을 듣고 꼬리질문을 하거나 한국어로 피드백을 주세요. "
-            "답변은 구어체로 짧고 간결하게(2~3문장 이내) 하세요."
-        )
+        
+        # 질문 리스트를 텍스트로 변환
+        q_text = "\n".join([f"- {q}" for q in questions_list])
+        
+        system_prompt = f"""
+        당신은 베테랑 면접관이자 업계의 시니어입니다. 
+        지원자의 답변("{user_text}")에 대해 자연스럽게 반응하고 대화를 이어가세요.
+        
+        [지침]
+        1. 답변이 부족하면 꼬리질문을 하세요.
+        2. 답변이 충분하면, 아래 [질문 리스트] 중 하나를 자연스럽게 화제를 전환하며 물어보세요.
+        3. 대화하듯이 진행하고, 2~3문장 이내로 짧고 간결하게 답변하세요.
+        4. 한국어로 답변하세요. 한자나 히라가나를 출력하지 마세요.
+        5. 문맥상 어색한 단어는 문맥에 맞는 전문용어로 추론하여 내부적으로 해석하세요.
+
+        [질문 리스트]
+        {q_text}
+        """
+
         return self.groq_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -87,7 +135,6 @@ class AIOrchestrator:
             model=model_id,
             stream=True 
         )
-
     # =========================================================================
     # [New] LLM2: 면접 코치 (실시간 피드백 & 최종 평가)
     # =========================================================================
