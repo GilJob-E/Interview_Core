@@ -18,7 +18,11 @@ async def interview_endpoint(websocket: WebSocket):
     print("[WS] Client Connected")
 
     try:
-        # VAD Variables
+        # ------------------------------------------------------------------
+        # 1. 변수 및 상태 초기화
+        # ------------------------------------------------------------------
+        
+        # Audio Buffer & VAD Variables
         audio_buffer = bytearray()
         pre_speech_buffer = deque(maxlen=3) 
         
@@ -26,37 +30,36 @@ async def interview_endpoint(websocket: WebSocket):
         is_speaking = False
         SILENCE_THRESHOLD = 0.03 
         
-        # 기본 상수 (Base Values)
+        # Dynamic VAD Constants
         BASE_MIN_PAUSE = 0.8  
         BASE_MAX_PAUSE = 2.5  
         
-        # [New] 비디오 프레임 버퍼
-        captured_frames = [] 
-        # [New] 자기소개서 텍스트 보관용 변수
-        intro_text = ""
+        checked_intermediate = False
+        
+        # [핵심] 인터뷰 컨텍스트 (자소서 텍스트 및 질문 리스트 관리)
+        interview_context = {
+            "intro_text": "",
+            "questions_queue": deque(), # LLM이 참고할 핵심 질문 리스트 (사라지지 않음)
+        }
 
+        # ------------------------------------------------------------------
+        # 2. 메인 루프 (Single Loop Architecture)
+        # ------------------------------------------------------------------
         while True:
-            # 1. 메시지 수신
+            # 메시지 수신
             message = await websocket.receive()
 
-            # 간단 로그: 어떤 형태의 메시지를 받았는지 출력
-            if "text" in message:
-                print(f"[RECV] text msg (len={len(message['text'])})")
-            elif "bytes" in message:
-                print(f"[RECV] bytes msg (len={len(message['bytes'])})")
-            else:
-                print("[RECV] unknown message shape")
-
             # =================================================
-            # Case A: 오디오 데이터 (Bytes) -> 기존 VAD 로직 수행
+            # Case A: 오디오 데이터 (Bytes) -> 대화 진행
             # =================================================
             if "bytes" in message:
                 data = message["bytes"]
                 chunk_array = np.frombuffer(data, dtype=np.float32)
                 rms = np.sqrt(np.mean(chunk_array**2))
                 
-                # VAD State Machine
+                # --- VAD State Machine ---
                 if rms > SILENCE_THRESHOLD:
+                    # 말하는 중 (Speech Detected)
                     if not is_speaking:
                         print(f"[VAD] Speech Detected (RMS: {rms:.4f})")
                         is_speaking = True
@@ -69,12 +72,14 @@ async def interview_endpoint(websocket: WebSocket):
                     audio_buffer.extend(data) 
                     
                 else:
+                    # 침묵 중 (Silence)
                     if is_speaking:
                         if silence_start_time == 0:
                             silence_start_time = asyncio.get_event_loop().time()
                         
                         audio_buffer.extend(data)
 
+                        # Dynamic VAD Logic (로그 스케일)
                         current_speech_duration = len(audio_buffer) / 64000.0
                         log_factor = np.log1p(current_speech_duration)
                         
@@ -103,16 +108,18 @@ async def interview_endpoint(websocket: WebSocket):
                             print(f"[VAD] dynamic_max_pause: ({dynamic_max_pause:.2f}s)")
                             should_process = True
 
-                        # --- [턴 종료 처리] ---
+                        # --- [턴 종료 처리 및 분석 시작] ---
                         if should_process:
-                            print(f"[VAD Trigger] Final Silence Duration: {silence_duration:.2f} sec")
+                            print(f"[VAD Trigger] Final Silence: {silence_duration:.2f}s")
                             full_audio_bytes = bytes(audio_buffer)
                             full_audio_np = np.frombuffer(full_audio_bytes, dtype=np.float32)
                             duration_sec = len(full_audio_np) / 16000
                             
+                            # 1. STT (Final)
                             print("[STT] Transcribing Final...")
                             user_text = ai_engine.transcribe_audio(full_audio_np)
                             
+                            # 버퍼 및 상태 초기화
                             audio_buffer = bytearray()
                             is_speaking = False
                             silence_start_time = 0
@@ -138,7 +145,12 @@ async def interview_endpoint(websocket: WebSocket):
                             )
 
                             # 3. LLM1 (면접관) & TTS
-                            llm_stream = ai_engine.generate_llm_response(user_text)
+                            current_questions = list(interview_context["questions_queue"])
+                            print(f"[AI] Thinking... (Context Questions: {len(current_questions)})")
+                            
+                            # LLM에게 (사용자 답변 + 질문 리스트) 전달 -> 자연스러운 대화 유도
+                            llm_stream = ai_engine.generate_llm_response(user_text, current_questions)
+                            
                             buffer = "" 
                             print("[TTS] Streaming Start...")
                             
@@ -169,8 +181,7 @@ async def interview_endpoint(websocket: WebSocket):
                                 "data": speak_result
                             })
 
-                            # 5. [New] LLM2 (면접 코치) 실시간 피드백 생성
-                            # 분석 결과(speak_result)가 나온 직후 호출합니다.
+                            # 5. LLM2 (면접 코치) 실시간 피드백 생성
                             print("[Coach] Generating Instant Feedback...")
                             coach_msg = await ai_engine.generate_instant_feedback(user_text, speak_result)
                             
@@ -185,46 +196,69 @@ async def interview_endpoint(websocket: WebSocket):
                         pre_speech_buffer.append(data)
 
             # =================================================
-            # Case B: 비디오 데이터 (Text/JSON) -> 프레임 수집 or self-intro text
+            # Case B: 텍스트/JSON 데이터 (자소서 or 비전)
             # =================================================
             elif "text" in message:
                 try:
-                    # 로그: 받은 JSON payload
-                    print(f"[RECV][json] {message['text'][:200]}")
                     payload = json.loads(message["text"])
-                    ptype = payload.get("type")
-                    if ptype == "text":
-                        # 자기소개서 저장
+                    msg_type = payload.get("type")
+
+                    # [1] 자소서 입력 처리 (최초 1회)
+                    if msg_type == "text":
                         intro_text = payload.get("data", "")
-                        print(f"[INTRO] Saved intro_text (len={len(intro_text)})")
+                        interview_context["intro_text"] = intro_text
+                        print(f"[INTRO] Analyzing resume (len={len(intro_text)})...")
                         
-                        # 기본질문 전송: 간단하게 자기소개를 해주세요
-                        initial_question = "간단하게 자기소개를 해주세요"
-                        print(f"[AI] Initial Question: {initial_question}")
+                        # (1) 자소서 분석 및 질문 생성 (비동기 처리 권장되나 Groq 속도로 커버)
+                        # LLM이 자소서를 보고 질문 3개를 뽑아냅니다.
+                        analysis_result = ai_engine.analyze_resume_and_generate_questions(intro_text)
+
+                        # 분석 결과 터미널 출력
+                        summary = analysis_result.get("summary", "요약 없음")
+                        generated_qs = analysis_result.get("questions", [])
+
+                        print("\n" + "="*60)
+                        print(f"[자소서 분석 리포트]")
+                        print("-" * 60)
+                        print(f"요약: {summary}")
+                        print("-" * 60)
+                        print("생성된 핵심 질문:")
+                        for idx, q in enumerate(generated_qs, 1):
+                            print(f"   {idx}. {q}")
+                        print("="*60 + "\n")
+                        
+                        if generated_qs:
+                            # 큐에 '저장'만 해두고, LLM이 대화할 때 참고하게 함
+                            interview_context["questions_queue"] = deque(generated_qs)
+
+                        # (2) [고정] 첫 질문 
+                        initial_question = "만나서 반갑습니다. 먼저 간단하게 자기소개를 해주세요"
+                        print(f"[AI] Start: {initial_question}")
+                        
                         await websocket.send_json({"type": "ai_text", "data": initial_question})
                         
-                        # 음성 변환 및 전송 (TTS)
+                        # TTS 스트리밍
                         print("[TTS] Streaming initial question...")
                         audio_stream = ai_engine.text_to_speech_stream(initial_question)
+                        
                         for audio_chunk in audio_stream:
                             await websocket.send_bytes(audio_chunk)
-                        
-                        # Optionally acknowledge client
+
+                        # 클라이언트에게 ACK 전송
                         await websocket.send_json({"type": "ack", "what": "intro_received"})
-                        continue
-                    
-                    if ptype == "video_frame":
-                         # Base64 -> Image Decoding
-                         img_data = base64.b64decode(payload["data"])
-                         np_arr = np.frombuffer(img_data, np.uint8)
-                         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                         
-                         if frame is not None:
-                             captured_frames.append(frame)
+
+                    # [2] 비디오 프레임 처리 (실시간 분석)
+                    # 리스트에 쌓지 않고 즉시 처리하여 레이턴시를 없앱니다.
+                    elif msg_type == "video_frame":
+                        img_data = base64.b64decode(payload["data"])
+                        np_arr = np.frombuffer(img_data, np.uint8)
+                        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                        
+                        if frame is not None:
+                            analyzer.process_vision_frame(frame)
 
                 except Exception as e:
-                    # 비디오 프레임 에러는 로그만 찍고 무시 (오디오 처리에 영향 안 주도록)
-                    print(f"[Video/Error] {e}")
+                    print(f"[JSON Process Error] {e}")
                     pass
 
     except WebSocketDisconnect:
