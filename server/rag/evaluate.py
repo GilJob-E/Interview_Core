@@ -98,6 +98,30 @@ class HybridComparisonMetrics:
 
 
 @dataclass
+class LatencyComparisonMetrics:
+    """Hybrid RAG vs Pure Non-RAG 레이턴시 비교 지표"""
+    query: str
+
+    # Hybrid RAG 레이턴시 (ms)
+    hybrid_total_ms: float            # 전체 소요 시간
+    hybrid_retrieval_ms: float        # FAISS 검색 시간
+    hybrid_rag_generation_ms: float   # RAG LLM 생성 시간
+    hybrid_nonrag_generation_ms: float # non-RAG LLM 생성 시간 (병렬)
+    hybrid_scoring_ms: float          # ContextScorer 계산 시간
+
+    # Pure Non-RAG 레이턴시 (ms)
+    pure_nonrag_ms: float             # 순수 LLM 호출 시간
+
+    # 비교
+    latency_diff_ms: float            # hybrid - pure_nonrag
+    latency_ratio: float              # hybrid / pure_nonrag
+
+    # 메타데이터
+    hybrid_selected_source: str       # Hybrid 결과: "RAG" 또는 "non-RAG"
+    hybrid_context_score: float       # ContextScorer 점수
+
+
+@dataclass
 class EvaluationResult:
     """전체 평가 결과"""
     timestamp: str
@@ -1092,6 +1116,298 @@ class RAGEvaluator:
 
         print(f"💾 Hybrid 결과 저장됨: {output_file}")
 
+    # =========================================================================
+    # Latency Comparison Evaluation (Hybrid RAG vs Pure Non-RAG)
+    # =========================================================================
+
+    async def evaluate_latency_comparison(
+        self,
+        query: str,
+        context_threshold: float = 0.35,
+        warmup: bool = False
+    ) -> LatencyComparisonMetrics:
+        """
+        Hybrid RAG vs Pure Non-RAG 레이턴시 비교 평가
+
+        Hybrid RAG의 세부 레이턴시와 Pure Non-RAG의 레이턴시를 비교
+
+        Args:
+            query: 테스트 쿼리
+            context_threshold: 컨텍스트 참조 임계값
+            warmup: 웜업 실행 여부 (첫 호출 시 초기화 오버헤드 제거)
+
+        Returns:
+            LatencyComparisonMetrics: 레이턴시 비교 결과
+        """
+        from .async_chain import HybridRAGGenerator
+        from .context_scorer import ContextScorer
+        from .vectorstore import get_embeddings
+
+        embedding_model = get_embeddings()
+
+        # 1. Hybrid RAG 세부 레이턴시 측정
+        # ---------------------------------------------------------------
+        # 체인 준비
+        rag_chain = self.rag.chain
+        retriever = self.rag.retriever
+        no_rag_chain = create_no_rag_chain(
+            model=self.rag.model,
+            temperature=self.rag.temperature
+        )
+        scorer = ContextScorer(embedding_model=embedding_model)
+
+        # 1-1. Retrieval 시간
+        retrieval_start = time.perf_counter()
+        retrieved_docs = retriever.invoke(query)
+        retrieval_time = (time.perf_counter() - retrieval_start) * 1000
+
+        # 1-2. RAG Generation 시간
+        rag_gen_start = time.perf_counter()
+        rag_response = rag_chain.invoke(query)
+        rag_gen_time = (time.perf_counter() - rag_gen_start) * 1000
+
+        # 1-3. Non-RAG Generation 시간 (Hybrid 내 병렬 실행)
+        nonrag_gen_start = time.perf_counter()
+        hybrid_nonrag_response = no_rag_chain.invoke(query)
+        nonrag_gen_time = (time.perf_counter() - nonrag_gen_start) * 1000
+
+        # 1-4. Scoring 시간
+        scoring_start = time.perf_counter()
+        context_score, score_details = scorer.calculate_reference_score(
+            rag_response, retrieved_docs, query
+        )
+        scoring_time = (time.perf_counter() - scoring_start) * 1000
+
+        # Hybrid 총 시간 계산
+        # 실제로는 병렬 실행이므로: max(retrieval+rag_gen, nonrag_gen) + scoring
+        # 여기서는 순차 실행으로 측정했으므로 조정 필요
+        parallel_time = max(retrieval_time + rag_gen_time, nonrag_gen_time)
+        hybrid_total_time = parallel_time + scoring_time
+
+        # Hybrid 선택 결과
+        if context_score >= context_threshold:
+            selected_source = "RAG"
+        else:
+            selected_source = "non-RAG"
+
+        # 2. Pure Non-RAG 레이턴시 측정 (독립 실행)
+        # ---------------------------------------------------------------
+        pure_nonrag_start = time.perf_counter()
+        pure_nonrag_response = no_rag_chain.invoke(query)
+        pure_nonrag_time = (time.perf_counter() - pure_nonrag_start) * 1000
+
+        # 3. 비교 계산
+        # ---------------------------------------------------------------
+        latency_diff = hybrid_total_time - pure_nonrag_time
+        latency_ratio = hybrid_total_time / pure_nonrag_time if pure_nonrag_time > 0 else 0
+
+        return LatencyComparisonMetrics(
+            query=query,
+            hybrid_total_ms=round(hybrid_total_time, 2),
+            hybrid_retrieval_ms=round(retrieval_time, 2),
+            hybrid_rag_generation_ms=round(rag_gen_time, 2),
+            hybrid_nonrag_generation_ms=round(nonrag_gen_time, 2),
+            hybrid_scoring_ms=round(scoring_time, 2),
+            pure_nonrag_ms=round(pure_nonrag_time, 2),
+            latency_diff_ms=round(latency_diff, 2),
+            latency_ratio=round(latency_ratio, 2),
+            hybrid_selected_source=selected_source,
+            hybrid_context_score=round(context_score, 3)
+        )
+
+    async def run_latency_evaluation(
+        self,
+        n_samples: int = 10,
+        context_threshold: float = 0.35,
+        warmup_runs: int = 1,
+        save_results: bool = True,
+        output_dir: Optional[Path] = None
+    ) -> Tuple[List[LatencyComparisonMetrics], Dict]:
+        """
+        레이턴시 비교 평가 실행
+
+        Args:
+            n_samples: 테스트할 샘플 수
+            context_threshold: 컨텍스트 참조 임계값
+            warmup_runs: 웜업 실행 횟수 (콜드 스타트 제거)
+            save_results: 결과 저장 여부
+            output_dir: 결과 저장 디렉토리
+
+        Returns:
+            (결과 리스트, 통계)
+        """
+        print(f"\n{'='*60}")
+        print(f"⏱️  레이턴시 비교 평가 시작 (Hybrid RAG vs Pure Non-RAG)")
+        print(f"{'='*60}")
+        print(f"샘플 수: {n_samples}, 임계값: {context_threshold}\n")
+
+        test_queries = self.create_test_queries(n_samples)
+        results = []
+
+        # 웜업 실행 (콜드 스타트 제거)
+        if warmup_runs > 0:
+            print(f"🔥 웜업 실행 중 ({warmup_runs}회)...")
+            warmup_query = test_queries[0]["query"]
+            for i in range(warmup_runs):
+                await self.evaluate_latency_comparison(
+                    warmup_query,
+                    context_threshold=context_threshold,
+                    warmup=True
+                )
+            print("   웜업 완료\n")
+
+        # 본 평가 실행
+        for i, tc in enumerate(test_queries):
+            print(f"[{i+1}/{len(test_queries)}] \"{tc['query'][:40]}...\"")
+
+            metrics = await self.evaluate_latency_comparison(
+                tc["query"],
+                context_threshold=context_threshold
+            )
+            results.append(metrics)
+
+            print(f"  → Hybrid: {metrics.hybrid_total_ms:.0f}ms "
+                  f"(Retrieval: {metrics.hybrid_retrieval_ms:.0f}ms, "
+                  f"RAG Gen: {metrics.hybrid_rag_generation_ms:.0f}ms, "
+                  f"Scoring: {metrics.hybrid_scoring_ms:.0f}ms)")
+            print(f"  → Pure Non-RAG: {metrics.pure_nonrag_ms:.0f}ms")
+            print(f"  → Ratio: {metrics.latency_ratio:.2f}x, "
+                  f"Selected: {metrics.hybrid_selected_source}")
+
+        # 통계 계산
+        stats = self._calculate_latency_stats(results)
+
+        # 결과 출력
+        self._print_latency_summary(results, stats)
+
+        # 결과 저장
+        if save_results:
+            self._save_latency_results(results, stats, output_dir)
+
+        return results, stats
+
+    def _calculate_latency_stats(
+        self,
+        results: List[LatencyComparisonMetrics]
+    ) -> Dict:
+        """
+        레이턴시 통계 계산
+
+        Args:
+            results: 레이턴시 비교 결과 리스트
+
+        Returns:
+            통계 딕셔너리
+        """
+        if not results:
+            return {}
+
+        n = len(results)
+
+        # 평균 계산
+        avg_hybrid_total = sum(r.hybrid_total_ms for r in results) / n
+        avg_retrieval = sum(r.hybrid_retrieval_ms for r in results) / n
+        avg_rag_gen = sum(r.hybrid_rag_generation_ms for r in results) / n
+        avg_nonrag_gen = sum(r.hybrid_nonrag_generation_ms for r in results) / n
+        avg_scoring = sum(r.hybrid_scoring_ms for r in results) / n
+        avg_pure_nonrag = sum(r.pure_nonrag_ms for r in results) / n
+        avg_diff = sum(r.latency_diff_ms for r in results) / n
+        avg_ratio = sum(r.latency_ratio for r in results) / n
+
+        # 최소/최대
+        min_ratio = min(r.latency_ratio for r in results)
+        max_ratio = max(r.latency_ratio for r in results)
+
+        # RAG 선택 비율
+        rag_count = sum(1 for r in results if r.hybrid_selected_source == "RAG")
+
+        return {
+            "total_samples": n,
+            "avg_hybrid_total_ms": round(avg_hybrid_total, 2),
+            "avg_hybrid_retrieval_ms": round(avg_retrieval, 2),
+            "avg_hybrid_rag_generation_ms": round(avg_rag_gen, 2),
+            "avg_hybrid_nonrag_generation_ms": round(avg_nonrag_gen, 2),
+            "avg_hybrid_scoring_ms": round(avg_scoring, 2),
+            "avg_pure_nonrag_ms": round(avg_pure_nonrag, 2),
+            "avg_latency_diff_ms": round(avg_diff, 2),
+            "avg_latency_ratio": round(avg_ratio, 2),
+            "min_latency_ratio": round(min_ratio, 2),
+            "max_latency_ratio": round(max_ratio, 2),
+            "rag_selection_count": rag_count,
+            "rag_selection_rate": round(rag_count / n, 2)
+        }
+
+    def _print_latency_summary(
+        self,
+        results: List[LatencyComparisonMetrics],
+        stats: Dict
+    ):
+        """레이턴시 평가 결과 요약 출력"""
+        print(f"\n{'='*60}")
+        print("📊 레이턴시 비교 평가 결과")
+        print(f"{'='*60}")
+
+        print(f"\n📈 평균 레이턴시:")
+        print(f"  - Hybrid RAG: {stats['avg_hybrid_total_ms']:.0f}ms")
+        print(f"    ├─ Retrieval: {stats['avg_hybrid_retrieval_ms']:.0f}ms")
+        print(f"    ├─ RAG Generation: {stats['avg_hybrid_rag_generation_ms']:.0f}ms")
+        print(f"    ├─ NonRAG Generation: {stats['avg_hybrid_nonrag_generation_ms']:.0f}ms")
+        print(f"    └─ Scoring: {stats['avg_hybrid_scoring_ms']:.0f}ms")
+        print(f"\n  - Pure Non-RAG: {stats['avg_pure_nonrag_ms']:.0f}ms")
+
+        print(f"\n📊 비교 분석:")
+        diff = stats['avg_latency_diff_ms']
+        if diff > 0:
+            print(f"  - 차이: +{diff:.0f}ms (Hybrid가 더 느림)")
+        else:
+            print(f"  - 차이: {diff:.0f}ms (Hybrid가 더 빠름)")
+
+        print(f"  - 비율: {stats['avg_latency_ratio']:.2f}x "
+              f"(범위: {stats['min_latency_ratio']:.2f}x ~ {stats['max_latency_ratio']:.2f}x)")
+
+        # 해석
+        ratio = stats['avg_latency_ratio']
+        print(f"\n📋 해석:")
+        if ratio < 1.5:
+            print(f"  ✅ Hybrid 오버헤드 낮음 - RAG 활용 권장")
+        elif ratio < 2.5:
+            print(f"  ⚠️ 허용 가능 범위 - 품질 향상과 trade-off")
+        else:
+            print(f"  ❌ 최적화 필요 - Scoring 또는 Retrieval 개선 권장")
+
+        print(f"\n🎯 Hybrid 결과:")
+        print(f"  - RAG 선택: {stats['rag_selection_count']}/{stats['total_samples']} "
+              f"({stats['rag_selection_rate']*100:.1f}%)")
+
+        print(f"\n{'='*60}\n")
+
+    def _save_latency_results(
+        self,
+        results: List[LatencyComparisonMetrics],
+        stats: Dict,
+        output_dir: Optional[Path] = None
+    ):
+        """레이턴시 평가 결과 저장"""
+        if output_dir is None:
+            output_dir = Path(__file__).parent / "evaluation_results"
+
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = output_dir / f"latency_{timestamp}.json"
+
+        data = {
+            "timestamp": datetime.now().isoformat(),
+            "stats": stats,
+            "all_results": [asdict(r) for r in results]
+        }
+
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        print(f"💾 레이턴시 결과 저장됨: {output_file}")
+
 
 def run_quick_test():
     """빠른 테스트 (3개 샘플)"""
@@ -1141,15 +1457,35 @@ if __name__ == "__main__":
         help="Hybrid 평가 모드 (ContextScorer 기반)"
     )
     parser.add_argument(
+        "--latency", "-l",
+        action="store_true",
+        help="레이턴시 비교 평가 모드 (Hybrid RAG vs Pure Non-RAG)"
+    )
+    parser.add_argument(
         "--threshold", "-t",
         type=float,
-        default=0.5,
-        help="Context score 임계값 (기본: 0.5)"
+        default=0.35,
+        help="Context score 임계값 (기본: 0.35)"
+    )
+    parser.add_argument(
+        "--warmup", "-w",
+        type=int,
+        default=1,
+        help="웜업 실행 횟수 (기본: 1)"
     )
 
     args = parser.parse_args()
 
-    if args.hybrid:
+    if args.latency:
+        # 레이턴시 비교 평가 모드
+        evaluator = RAGEvaluator()
+        asyncio.run(evaluator.run_latency_evaluation(
+            n_samples=args.samples if not args.quick else 3,
+            context_threshold=args.threshold,
+            warmup_runs=args.warmup,
+            save_results=not args.no_save
+        ))
+    elif args.hybrid:
         # Hybrid 평가 모드 (ContextScorer 기반)
         evaluator = RAGEvaluator()
         asyncio.run(evaluator.run_hybrid_evaluation(
