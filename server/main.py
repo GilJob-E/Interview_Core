@@ -26,9 +26,9 @@ async def interview_endpoint(websocket: WebSocket):
         is_speaking = False
         SILENCE_THRESHOLD = 0.03 
         
-        # [수정 1] 기본 상수 (Base Values)
-        BASE_MIN_PAUSE = 0.8  # 단답형은 더 빨리 반응하도록 낮춤 (0.8초)
-        BASE_MAX_PAUSE = 2.5  # 기본 최대 대기
+        # 기본 상수 (Base Values)
+        BASE_MIN_PAUSE = 0.8  
+        BASE_MAX_PAUSE = 2.5  
         
         checked_intermediate = False
 
@@ -36,9 +36,6 @@ async def interview_endpoint(websocket: WebSocket):
             # 1. 메시지 수신
             message = await websocket.receive()
 
-            # =================================================
-            # Case A: 오디오 데이터 (Bytes)
-            # =================================================
             if "bytes" in message:
                 data = message["bytes"]
                 chunk_array = np.frombuffer(data, dtype=np.float32)
@@ -64,16 +61,9 @@ async def interview_endpoint(websocket: WebSocket):
                         
                         audio_buffer.extend(data)
 
-                        # [수정 2] 발화 시간 계산
                         current_speech_duration = len(audio_buffer) / 64000.0
-
-                        # [수정 3] 로그 스케일 적용 (장문 대기 시간 상향)
-                        # np.log1p(x) = ln(1 + x)
                         log_factor = np.log1p(current_speech_duration)
                         
-                        # 계수 상향 조정 (Longer Wait for Long Speech)
-                        # MIN: 기본 0.8초 + (로그값 * 0.8) -> 30초 말하면 약 3.5초 대기
-                        # MAX: 기본 2.5초 + (로그값 * 1.5) -> 30초 말하면 약 6초 대기
                         dynamic_min_pause = BASE_MIN_PAUSE + (log_factor * 0.8) 
                         dynamic_max_pause = BASE_MAX_PAUSE + (log_factor * 1.0) 
 
@@ -84,23 +74,24 @@ async def interview_endpoint(websocket: WebSocket):
                         
                         # A. 1차 점검 (Semantic Check)
                         if silence_duration > dynamic_min_pause and not checked_intermediate:
-                            print(f"[VAD] Check (Speech: {current_speech_duration:.1f}s, LogWait: {dynamic_min_pause:.2f}s)...")
+                            # print(f"[VAD] Check ({current_speech_duration:.1f}s)...")
                             temp_audio = np.frombuffer(bytes(audio_buffer), dtype=np.float32)
                             temp_text = ai_engine.transcribe_audio(temp_audio)
                             
                             if temp_text and ai_engine.is_sentence_complete(temp_text):
-                                print("[VAD] Sentence Complete. Processing.")
+                                print("[VAD] Sentence Complete.")
                                 should_process = True
                             else:
                                 checked_intermediate = True
 
                         # B. 최대 시간 초과
                         if silence_duration > dynamic_max_pause:
-                            print(f"[VAD] Max Pause Reached ({dynamic_max_pause:.2f}s). Forcing process.")
+                            print(f"[VAD] Max Pause. Forcing process.")
                             should_process = True
 
                         # --- [턴 종료 처리] ---
                         if should_process:
+                            print(f"[VAD Trigger] Final Silence Duration: {silence_duration:.2f} sec")
                             full_audio_bytes = bytes(audio_buffer)
                             full_audio_np = np.frombuffer(full_audio_bytes, dtype=np.float32)
                             duration_sec = len(full_audio_np) / 16000
@@ -122,7 +113,7 @@ async def interview_endpoint(websocket: WebSocket):
                             print(f"[User]: {user_text}")
                             await websocket.send_json({"type": "user_text", "data": user_text})
 
-                            # 2. 멀티모달 분석
+                            # 2. 멀티모달 분석 시작 (비동기)
                             print(f"[Vision] Flushing accumulated stats...")
                             analysis_task = asyncio.create_task(
                                 analyzer.analyze_turn(
@@ -132,7 +123,7 @@ async def interview_endpoint(websocket: WebSocket):
                                 )
                             )
 
-                            # 3. LLM & TTS
+                            # 3. LLM1 (면접관) & TTS
                             llm_stream = ai_engine.generate_llm_response(user_text)
                             buffer = "" 
                             print("[TTS] Streaming Start...")
@@ -156,12 +147,23 @@ async def interview_endpoint(websocket: WebSocket):
                                 for audio_chunk in audio_stream:
                                     await websocket.send_bytes(audio_chunk)
 
-                            # 4. 분석 결과
-                            analysis_result = await analysis_task
-                            print(f"[Analysis Done] Send to Client")
+                            # 4. 분석 결과 대기 및 전송
+                            speak_result = await analysis_task
+                            print(f"[Analysis Done] Features Extracted.")
                             await websocket.send_json({
                                 "type": "feedback",
-                                "data": analysis_result
+                                "data": speak_result
+                            })
+
+                            # 5. [New] LLM2 (면접 코치) 실시간 피드백 생성
+                            # 분석 결과(speak_result)가 나온 직후 호출합니다.
+                            print("[Coach] Generating Instant Feedback...")
+                            coach_msg = await ai_engine.generate_instant_feedback(user_text, speak_result)
+                            
+                            print(f"[Coach Suggestion]: {coach_msg}")
+                            await websocket.send_json({
+                                "type": "coach_feedback",
+                                "data": coach_msg
                             })
 
                             print("[Turn] Cycle Completed.")

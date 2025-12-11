@@ -123,8 +123,15 @@ async def run_client():
                             
                             if msg_type == "user_text":
                                 print(f"\n[User]: {res['data']}")
+
                             elif msg_type == "ai_text":
                                 print(f"[AI]: {res['data']}")
+                        
+                            elif msg_type == "coach_feedback":
+                                # [New] 코치 피드백 출력
+                                print(f"\n[Coach]: {res['data']}")
+                                print("-" * 50)
+
                             elif msg_type == "feedback":
                                 # 상세 분석 결과 출력
                                 print("\n[Analysis Result]")
