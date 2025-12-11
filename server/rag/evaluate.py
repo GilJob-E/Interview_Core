@@ -1190,14 +1190,14 @@ class RAGEvaluator:
         else:
             selected_source = "non-RAG"
 
-        # 2. Pure Non-RAG 레이턴시 측정 (독립 실행)
+        # 2. Pure Non-RAG 레이턴시 = Hybrid 내부에서 측정된 값 사용
         # ---------------------------------------------------------------
-        pure_nonrag_start = time.perf_counter()
-        pure_nonrag_response = no_rag_chain.invoke(query)
-        pure_nonrag_time = (time.perf_counter() - pure_nonrag_start) * 1000
+        # 동일 프롬프트, 동일 시점에서 측정된 값으로 공정한 비교
+        pure_nonrag_time = nonrag_gen_time
 
         # 3. 비교 계산
         # ---------------------------------------------------------------
+        # Hybrid 오버헤드 = retrieval + scoring + (rag_gen이 nonrag_gen보다 느린 경우의 추가 시간)
         latency_diff = hybrid_total_time - pure_nonrag_time
         latency_ratio = hybrid_total_time / pure_nonrag_time if pure_nonrag_time > 0 else 0
 
