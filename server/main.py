@@ -33,10 +33,20 @@ async def interview_endpoint(websocket: WebSocket):
         
         # [New] 비디오 프레임 버퍼
         captured_frames = [] 
+        # [New] 자기소개서 텍스트 보관용 변수
+        intro_text = ""
 
         while True:
             # 1. 메시지 수신 (텍스트/바이트 구분)
             message = await websocket.receive()
+
+            # 간단 로그: 어떤 형태의 메시지를 받았는지 출력
+            if "text" in message:
+                print(f"[RECV] text msg (len={len(message['text'])})")
+            elif "bytes" in message:
+                print(f"[RECV] bytes msg (len={len(message['bytes'])})")
+            else:
+                print("[RECV] unknown message shape")
 
             # =================================================
             # Case A: 오디오 데이터 (Bytes) -> 기존 VAD 로직 수행
@@ -180,22 +190,46 @@ async def interview_endpoint(websocket: WebSocket):
                         pre_speech_buffer.append(data)
 
             # =================================================
-            # Case B: 비디오 데이터 (Text/JSON) -> 프레임 수집
+            # Case B: 비디오 데이터 (Text/JSON) -> 프레임 수집 or self-intro text
             # =================================================
             elif "text" in message:
                 try:
+                    # 로그: 받은 JSON payload
+                    print(f"[RECV][json] {message['text'][:200]}")
                     payload = json.loads(message["text"])
-                    if payload.get("type") == "video_frame":
-                        # Base64 -> Image Decoding
-                        img_data = base64.b64decode(payload["data"])
-                        np_arr = np.frombuffer(img_data, np.uint8)
-                        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    ptype = payload.get("type")
+                    if ptype == "text":
+                        # 자기소개서 저장
+                        intro_text = payload.get("data", "")
+                        print(f"[INTRO] Saved intro_text (len={len(intro_text)})")
                         
-                        if frame is not None:
-                            captured_frames.append(frame)
+                        # 기본질문 전송: 간단하게 자기소개를 해주세요
+                        initial_question = "간단하게 자기소개를 해주세요"
+                        print(f"[AI] Initial Question: {initial_question}")
+                        await websocket.send_json({"type": "ai_text", "data": initial_question})
+                        
+                        # 음성 변환 및 전송 (TTS)
+                        print("[TTS] Streaming initial question...")
+                        audio_stream = ai_engine.text_to_speech_stream(initial_question)
+                        for audio_chunk in audio_stream:
+                            await websocket.send_bytes(audio_chunk)
+                        
+                        # Optionally acknowledge client
+                        await websocket.send_json({"type": "ack", "what": "intro_received"})
+                        continue
+                    
+
+                    if ptype == "video_frame":
+                         # Base64 -> Image Decoding
+                         img_data = base64.b64decode(payload["data"])
+                         np_arr = np.frombuffer(img_data, np.uint8)
+                         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                         
+                         if frame is not None:
+                             captured_frames.append(frame)
                 except Exception as e:
                     # 비디오 프레임 에러는 로그만 찍고 무시 (오디오 처리에 영향 안 주도록)
-                    # print(f"[Video Error] {e}")
+                    print(f"[Video/Error] {e}")
                     pass
 
     except WebSocketDisconnect:
