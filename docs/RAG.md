@@ -249,3 +249,127 @@ GROQ_API_KEY=your_groq_api_key
 | Index Size | 252 MB |
 | Query Latency | < 500ms |
 | Embedding Dimension | 384 |
+
+## Evaluation System
+
+RAG 시스템의 실효성을 평가하기 위한 도구
+
+### Module Structure
+
+```
+server/rag/
+├── evaluate.py           # 평가 시스템 메인
+└── evaluation_results/   # 평가 결과 JSON 저장 (gitignore)
+```
+
+### Metrics
+
+#### Retrieval Metrics (검색 품질)
+| Metric | Description |
+|--------|-------------|
+| `occupation_match_rate` | 검색된 문서의 직업군 일치율 |
+| `experience_match_rate` | 검색된 문서의 경력 일치율 |
+| `retrieval_time_ms` | 검색 소요 시간 (ms) |
+
+#### Generation Metrics (생성 품질)
+| Metric | Description |
+|--------|-------------|
+| `response_length` | 응답 길이 (characters) |
+| `generation_time_ms` | 생성 소요 시간 (ms) |
+| `is_korean` | 한국어 응답 여부 |
+| `is_question_format` | 질문 형식 여부 (꼬리질문) |
+
+### Usage
+
+```bash
+cd Interview_Core/server
+
+# 빠른 테스트 (3개 샘플)
+python -m rag.evaluate --quick
+
+# 전체 평가 (10개 샘플)
+python -m rag.evaluate --samples 10
+
+# 검색만 평가 (생성 제외)
+python -m rag.evaluate --no-generation
+
+# 결과 저장 안함
+python -m rag.evaluate --quick --no-save
+```
+
+### CLI Options
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--samples` | `-n` | 10 | 테스트할 샘플 수 |
+| `--quick` | `-q` | - | 빠른 테스트 모드 (3개 샘플) |
+| `--no-generation` | - | - | 생성 평가 건너뛰기 |
+| `--no-save` | - | - | 결과 파일 저장 안함 |
+
+### Output Example
+
+```
+============================================================
+                    📊 RAG 시스템 평가 결과
+============================================================
+
+📌 검색 품질 (Retrieval)
+------------------------------------------------------------
+  • 평균 직업군 일치율: 30.0%
+  • 평균 경력 일치율: 46.7%
+  • 평균 검색 시간: 21.3ms
+
+📌 생성 품질 (Generation)
+------------------------------------------------------------
+  • 평균 응답 길이: 76자
+  • 평균 생성 시간: 495.2ms
+  • 한국어 응답 비율: 100.0%
+  • 질문 형식 비율: 90.0%
+
+📌 종합 평가
+------------------------------------------------------------
+  • 검색 품질: 보통
+  • 생성 품질: 양호
+```
+
+### Test Cases
+
+20개의 다양한 테스트 케이스 포함:
+
+| 직업군 | 경력 | 예시 쿼리 |
+|--------|------|----------|
+| ICT | EXPERIENCED | "저는 10년간 백엔드 개발을 해왔습니다..." |
+| ICT | NEW | "컴퓨터공학을 전공하고 졸업 예정입니다..." |
+| BM | EXPERIENCED | "저는 5년간 프로젝트 매니저로 일했습니다..." |
+| SM | NEW | "마케팅을 전공했고, 인턴 경험이 있습니다..." |
+| RND | EXPERIENCED | "10년간 연구개발 분야에서 특허를 냈습니다..." |
+
+### Results Storage
+
+```
+server/rag/evaluation_results/
+└── evaluation_YYYYMMDD_HHMMSS.json
+```
+
+```json
+{
+  "timestamp": "2024-12-11T12:13:10",
+  "config": {
+    "num_samples": 10,
+    "k": 3,
+    "model": "llama-3.3-70b-versatile"
+  },
+  "summary": {
+    "retrieval": {
+      "avg_occupation_match": 0.30,
+      "avg_experience_match": 0.467
+    },
+    "generation": {
+      "korean_rate": 1.0,
+      "question_format_rate": 0.9
+    }
+  },
+  "retrieval_results": [...],
+  "generation_results": [...]
+}
+```
