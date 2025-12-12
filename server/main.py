@@ -39,9 +39,10 @@ async def interview_endpoint(websocket: WebSocket):
         # 인터뷰 컨텍스트 (자소서 텍스트 및 질문 리스트 관리)
         interview_context = {
             "intro_text": "",
-            "questions_queue": deque(), # LLM이 참고할 핵심 질문 리스트 (사라지지 않음)
-            "history": [],      # [New] 대화 기록 저장소
-            "turn_count": 0     # [New] 턴 횟수 카운터
+            "questions_queue": deque(), 
+            "history": [],       # 대화 기록 저장소
+            "turn_count": 0,     # 현재 완료된 턴 횟수
+            "target_turn_count": 3 # [New] 목표 턴 횟수 (기본값 3)
         }
 
         # ------------------------------------------------------------------
@@ -114,8 +115,7 @@ async def interview_endpoint(websocket: WebSocket):
                         if should_process:
                             print(f"[VAD Trigger] Final Silence: {silence_duration:.2f}s")
 
-                            # [수정] VAD 대기 시간(Final Silence)만큼 오디오 뒷부분 자르기
-                            # Sample Rate: 16000, Dtype: float32 (4 bytes) -> 64,000 bytes/sec
+                            # Audio Trimming (Alignment Fix Applied)
                             bytes_per_sec = 16000 * 4
                             silence_bytes = int(silence_duration * bytes_per_sec)
                             
@@ -123,7 +123,6 @@ async def interview_endpoint(websocket: WebSocket):
                             # 너무 빡빡하게 자르면 문장 끝이 짤릴 수 있으므로 0.2초 정도 여유(buffer)를 두고 자름.
                             safe_margin_sec = 0.2
                             safe_margin_bytes = int(safe_margin_sec * bytes_per_sec)
-                            
                             cut_amount = max(0, silence_bytes - safe_margin_bytes)
                             
                             # [Fix] cut_amount가 4의 배수가 되도록 조정 (Alignment)
@@ -136,19 +135,19 @@ async def interview_endpoint(websocket: WebSocket):
                             if cut_amount < len(raw_bytes):
                                 trimmed_bytes = raw_bytes[:-cut_amount]
                             else:
-                                trimmed_bytes = raw_bytes # 예외 시 원본 사용
+                                trimmed_bytes = raw_bytes
 
                             # 넘파이 배열 변환 (자른 데이터 사용)
                             full_audio_np = np.frombuffer(trimmed_bytes, dtype=np.float32)
                             duration_sec = len(full_audio_np) / 16000
                             
-                            print(f"[Audio Trim] Original: {len(raw_bytes)}B -> Trimmed: {len(trimmed_bytes)}B (Removed {silence_duration:.2f}s tail)")
+                            print(f"[Audio Trim] Original: {len(raw_bytes)}B -> Trimmed: {len(trimmed_bytes)}B")
                             
                             # 1. STT (Final)
                             print("[STT] Transcribing Final...")
                             user_text = ai_engine.transcribe_audio(full_audio_np)
                             
-                            # 버퍼 및 상태 초기화
+                            # 버퍼 초기화
                             audio_buffer = bytearray()
                             is_speaking = False
                             silence_start_time = 0
@@ -163,7 +162,7 @@ async def interview_endpoint(websocket: WebSocket):
                             print(f"[User]: {user_text}")
                             await websocket.send_json({"type": "user_text", "data": user_text})
 
-                            # 2. 멀티모달 분석 시작 (비동기)
+                            # 2. 멀티모달 분석 시작
                             print(f"[Vision] Flushing accumulated stats...")
                             analysis_task = asyncio.create_task(
                                 analyzer.analyze_turn(
@@ -173,41 +172,61 @@ async def interview_endpoint(websocket: WebSocket):
                                 )
                             )
 
-                            # 3. LLM1 (면접관) & TTS
-                            current_questions = list(interview_context["questions_queue"])
-                            current_history = interview_context["history"] # 현재까지 쌓인 기록
-                            print(f"[AI] Thinking... (Context Questions: {len(current_questions)}), (Memory: {len(current_history)} turns)")
+                            # [핵심 수정] 3. LLM1 응답 생성 (종료 조건 체크)
+                            current_turns = interview_context["turn_count"]
+                            target_turns = interview_context["target_turn_count"]
                             
-                            # LLM에게 (사용자 답변 + 질문 리스트) 전달 -> 자연스러운 대화 유도
-                            llm_stream = ai_engine.generate_llm_response(
-                                user_text, 
-                                current_questions, 
-                                current_history
-                            )
+                            # (현재 완료된 턴 + 이번 턴)이 목표보다 크거나 같으면 마지막 턴임
+                            is_final_turn = (current_turns + 1) >= target_turns
+                            full_ai_text = ""
                             
-                            buffer = "" 
-                            full_ai_text = "" # [New] AI 전체 답변 저장용
-                            print("[TTS] Streaming Start...")
-                            
-                            for chunk in llm_stream:
-                                if chunk.choices[0].delta.content:
-                                    token = chunk.choices[0].delta.content
-                                    buffer += token
-                                    full_ai_text += token # [New] 토큰 누적
-                                    if any(punct in token for punct in [".", "?", "!", "\n"]):
-                                        sentence = buffer.strip()
-                                        if sentence:
-                                            await websocket.send_json({"type": "ai_text", "data": sentence})
-                                            audio_stream = ai_engine.text_to_speech_stream(sentence)
-                                            for audio_chunk in audio_stream:
-                                                await websocket.send_bytes(audio_chunk)
-                                        buffer = ""
-                            
-                            if buffer.strip():
-                                await websocket.send_json({"type": "ai_text", "data": buffer.strip()})
-                                audio_stream = ai_engine.text_to_speech_stream(buffer.strip())
+                            if is_final_turn:
+                                print(f"[System] Final Turn Detected ({current_turns + 1}/{target_turns})")
+                                closing_ment = "답변 잘 들었습니다. 오늘 면접은 여기서 마무리하겠습니다. 고생하셨습니다."
+                                full_ai_text = closing_ment
+                                
+                                # 텍스트 전송
+                                await websocket.send_json({"type": "ai_text", "data": closing_ment})
+                                
+                                # TTS 전송
+                                audio_stream = ai_engine.text_to_speech_stream(closing_ment)
                                 for audio_chunk in audio_stream:
                                     await websocket.send_bytes(audio_chunk)
+                                    
+                            else:
+                                # 평소처럼 질문 생성
+                                current_questions = list(interview_context["questions_queue"])
+                                current_history = interview_context["history"]
+                                print(f"[AI] Thinking... (Context Questions: {len(current_questions)})")
+                                
+                                llm_stream = ai_engine.generate_llm_response(
+                                    user_text, 
+                                    current_questions, 
+                                    current_history
+                                )
+                                
+                                buffer = "" 
+                                print("[TTS] Streaming Start...")
+                                
+                                for chunk in llm_stream:
+                                    if chunk.choices[0].delta.content:
+                                        token = chunk.choices[0].delta.content
+                                        buffer += token
+                                        full_ai_text += token
+                                        if any(punct in token for punct in [".", "?", "!", "\n"]):
+                                            sentence = buffer.strip()
+                                            if sentence:
+                                                await websocket.send_json({"type": "ai_text", "data": sentence})
+                                                audio_stream = ai_engine.text_to_speech_stream(sentence)
+                                                for audio_chunk in audio_stream:
+                                                    await websocket.send_bytes(audio_chunk)
+                                            buffer = ""
+                                
+                                if buffer.strip():
+                                    await websocket.send_json({"type": "ai_text", "data": buffer.strip()})
+                                    audio_stream = ai_engine.text_to_speech_stream(buffer.strip())
+                                    for audio_chunk in audio_stream:
+                                        await websocket.send_bytes(audio_chunk)
 
                             # 4. 분석 결과 대기 및 전송
                             speak_result = await analysis_task
@@ -217,28 +236,38 @@ async def interview_endpoint(websocket: WebSocket):
                                 "data": speak_result
                             })
 
-                            # 5. LLM2 (면접 코치)
-                            async def send_coach_feedback_task(u_text, s_result):
+                            # 5. LLM2 (면접 코치) - Async Task
+                            async def send_coach_feedback_task(u_text, s_result, a_text):
                                 print("[Coach] Generating Feedback (GPT-4o)...")
                                 c_msg = await ai_engine.generate_instant_feedback(u_text, s_result)
                                 print(f"[Coach]: {c_msg}")
                                 
-                                # 클라이언트 전송
                                 await websocket.send_json({"type": "coach_feedback", "data": c_msg})
                                 
-                                # 히스토리에 추가 (스레드 안전성 고려 필요하지만, 간단한 리스트 append는 Python에서 atomic함)
+                                # 히스토리 저장
                                 interview_context["turn_count"] += 1
                                 interview_context["history"].append({
                                     "turn_id": interview_context["turn_count"],
                                     "user_text": u_text,
-                                    "ai_text": full_ai_text, # 상위 스코프 변수 사용 주의
+                                    "ai_text": a_text,
                                     "stats": s_result,
                                     "coach_feedback": c_msg
                                 })
+                                
+                                # [핵심 수정] 마지막 턴이었다면 종료 신호 전송
+                                if is_final_turn:
+                                    # 5초 대기
+                                    wait_time = 5
+                                    print(f"[System] Final turn. Waiting {wait_time:.1f}s for TTS...")
+                                    await asyncio.sleep(wait_time) 
+                                    
+                                    print("[System] Sending 'interview_end' signal...")
+                                    await websocket.send_json({"type": "interview_end"})
+                                    
+                            # 태스크 생성 (풀 텍스트 전달)
+                            asyncio.create_task(send_coach_feedback_task(user_text, speak_result, full_ai_text))
+                            print("[Turn] Cycle Completed")
 
-                            # 태스크 생성 (기다리지 않고 넘어감)
-                            asyncio.create_task(send_coach_feedback_task(user_text, speak_result))
-                            print("[Turn] Cycle Completed (Listening Mode ON)")
                     else:
                         pre_speech_buffer.append(data)
 
@@ -253,11 +282,17 @@ async def interview_endpoint(websocket: WebSocket):
                     # [1] 자소서 입력 처리 (최초 1회)
                     if msg_type == "text":
                         intro_text = payload.get("data", "")
+                        
+                        # [New] 클라이언트 설정값 적용 (질문 개수)
+                        config = payload.get("config", {})
+                        if "question_count" in config:
+                            interview_context["target_turn_count"] = int(config["question_count"])
+                            print(f"[Config] Target Questions Set to: {interview_context['target_turn_count']}")
+
                         interview_context["intro_text"] = intro_text
                         print(f"[INTRO] Analyzing resume (len={len(intro_text)})...")
                         
-                        # (1) 자소서 분석 및 질문 생성 (비동기 처리 권장되나 Groq 속도로 커버)
-                        # LLM이 자소서를 보고 질문 3개를 뽑아냅니다.
+                        # 자소서 분석
                         analysis_result = ai_engine.analyze_resume_and_generate_questions(intro_text)
 
                         # 분석 결과 터미널 출력
@@ -278,7 +313,7 @@ async def interview_endpoint(websocket: WebSocket):
                             # 큐에 '저장'만 해두고, LLM이 대화할 때 참고하게 함
                             interview_context["questions_queue"] = deque(generated_qs)
 
-                        # (2) [고정] 첫 질문 
+                        # 첫 질문 (고정)
                         initial_question = "만나서 반갑습니다. 먼저 간단하게 자기소개를 해주세요"
                         print(f"[AI] Start: {initial_question}")
                         
@@ -315,7 +350,7 @@ async def interview_endpoint(websocket: WebSocket):
                     pass
             
         # ------------------------------------------------------------------
-        # 3. 면접 종료 후 종합 리포트 생성 (수정됨)
+        # 3. 면접 종료 후 종합 리포트 생성
         # ------------------------------------------------------------------
         if not interview_context['history']:
             print("[Report] No history found. Skipping report.")
