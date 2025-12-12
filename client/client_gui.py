@@ -15,10 +15,11 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QTextEdit, QPushButton, QLabel, QStackedWidget, QGridLayout, 
     QProgressBar, QSpinBox, QFrame, QSizePolicy, QStackedLayout,
-    QFileDialog, QScrollArea, QRadioButton, QButtonGroup, QDialog, QTabWidget
+    QFileDialog, QScrollArea, QRadioButton, QButtonGroup, QDialog, QTabWidget,
+    QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve, QRectF, QPointF
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QColor, QPen, QFont, QBrush
+from PyQt6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QColor, QPen, QFont, QBrush, QFontDatabase, QKeyEvent
 import qasync
 import websockets
 
@@ -32,6 +33,9 @@ FRAME_WIDTH = 320
 FRAME_HEIGHT = 240  
 VIDEO_SEND_INTERVAL = 0.2
 
+# 폰트 패밀리 이름 저장용 전역 변수 (실행 시 로드됨)
+FONT_FAMILY_NANUM = "Segoe UI"  # 기본값
+
 # ==========================================
 # [설정] Feature 분류
 # ==========================================
@@ -41,13 +45,15 @@ NEGATIVE_FEATURES = ["f1_bandwidth", "pause_duration", "unvoiced_rate", "fillers
 # ==========================================
 # CSS 스타일 정의
 # ==========================================
+# 폰트는 실행 시점에 NanumSquare로 교체됩니다.
 GLOBAL_STYLE = """
     QMainWindow, QWidget#MainBackground {
         background-color: #0b0e14;
     }
     QWidget {
         color: #E2E8F0;
-        font-family: 'Segoe UI', sans-serif;
+        /* font-family는 main에서 동적으로 설정됨 */
+        font-size: 14px;
     }
     QFrame.Card {
         background-color: #151921;
@@ -126,6 +132,11 @@ GLOBAL_STYLE = """
         text-align: center;
         color: transparent;
     }
+    QCheckBox {
+        color: #E2E8F0;
+        font-size: 14px;
+        spacing: 5px;
+    }
     QLabel.Title {
         color: white;
         font-size: 26px;
@@ -160,8 +171,6 @@ GLOBAL_STYLE = """
     }
 """
 
-# ... (기존 위젯: WebcamFeedbackWidget, IntroPage 등은 변경 없음, 코드 길이상 생략하지 않고 모두 포함)
-
 class WebcamFeedbackWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -183,7 +192,6 @@ class WebcamFeedbackWidget(QWidget):
     def update_frame(self, pixmap):
         self.lbl_video.setPixmap(pixmap)
 
-# ... (NormalDistributionWidget, AnalysisDetailWidget, TurnWidget, FeedbackDisplayWidget, InterviewOverlay, InterviewPage 등 유지)
 
 class NormalDistributionWidget(QWidget):
     def __init__(self, key_name, title, z_score, value, unit, parent=None):
@@ -194,11 +202,16 @@ class NormalDistributionWidget(QWidget):
         self.z_score = z_score if z_score is not None else 0.0
         self.value = value
         self.unit = unit
-        self.setStyleSheet("background-color: #2D3748; border: 1px solid #4A5568; border-radius: 8px;")
+        # [FONT FIX] f-string 적용
+        self.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; background-color: #2D3748; border: 1px solid #4A5568; border-radius: 8px;")
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # [FONT FIX] NanumSquare
+        painter.setFont(QFont(FONT_FAMILY_NANUM, 10))
+
         rect = self.rect()
         margin = 15
         graph_rect = QRectF(margin, margin + 25, rect.width() - 2*margin, rect.height() - 2*margin - 25)
@@ -232,19 +245,21 @@ class NormalDistributionWidget(QWidget):
         painter.drawLine(int(user_x_pos), int(graph_rect.top()), int(user_x_pos), int(graph_rect.bottom()))
 
         painter.setPen(QColor("white"))
-        painter.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        painter.setFont(QFont(FONT_FAMILY_NANUM, 10, QFont.Weight.Bold))
         painter.drawText(rect.adjusted(5, 8, -5, 0), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter, self.title)
         
         percentile = (1 + math.erf(self.z_score / math.sqrt(2))) / 2 * 100
-        painter.setFont(QFont("Segoe UI", 8))
+        painter.setFont(QFont(FONT_FAMILY_NANUM, 8))
         painter.setPen(QColor("#CBD5E0"))
         painter.drawText(rect.adjusted(0, 0, 0, -8), Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter, f"{self.value} {self.unit}\n(상위 {100-percentile:.1f}%)")
+
 
 class AnalysisDetailWidget(QWidget):
     def __init__(self, feedback_data, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet("background-color: #232936; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;")
+        # [FONT FIX] f-string 적용
+        self.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; background-color: #232936; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;")
         self.setMaximumHeight(0)
         self.setMinimumHeight(0)
         self.clips = True 
@@ -265,7 +280,8 @@ class AnalysisDetailWidget(QWidget):
         top_3 = features[:3]
         if not top_3:
             lbl = QLabel("분석 데이터가 충분하지 않습니다.")
-            lbl.setStyleSheet("color: #A0AEC0; border: none;")
+            # [FONT FIX] f-string 적용
+            lbl.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; color: #A0AEC0; border: none;")
             self.layout.addWidget(lbl)
         else:
             for feat in top_3:
@@ -286,7 +302,8 @@ class TurnWidget(QFrame):
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setStyleSheet("background-color: #4A5568;")
+        # [FONT FIX] f-string 적용
+        line.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; background-color: #4A5568;")
         line.setFixedHeight(1)
         layout.addWidget(line)
 
@@ -297,17 +314,12 @@ class TurnWidget(QFrame):
         lbl_ai.setWordWrap(True)
         layout.addWidget(lbl_ai)
         
-        # 데이터 존재 여부 확인
+        # 2. 사용자 답변 영역 처리
         user_lines = turn_data.get("user", [])
-        coach_msg = turn_data.get("coach", "")
-        
         has_user_response = len(user_lines) > 0
+        coach_msg = turn_data.get("coach", "")
         has_coach_feedback = bool(coach_msg)
 
-        # 2. 사용자 답변 영역 처리
-        # - 답변이 있으면: 표시
-        # - 답변이 없고 코치 피드백이 있으면: "(답변 없음)" 표시 (침묵한 경우)
-        # - 둘 다 없으면: 표시 안 함 (마무리 멘트인 경우) ★
         if has_user_response:
             user_text = "<br>".join(user_lines)
             lbl_user = QLabel(user_text)
@@ -317,11 +329,11 @@ class TurnWidget(QFrame):
         elif has_coach_feedback:
             lbl_user = QLabel("(답변 없음)")
             lbl_user.setProperty("class", "SectionUser")
-            lbl_user.setStyleSheet("color: #718096; font-style: italic;")
+            # [FONT FIX] f-string 적용
+            lbl_user.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; color: #718096; font-style: italic;")
             layout.addWidget(lbl_user)
         
         # 3. 코치 피드백 영역 처리
-        # - 피드백이 있을 때만 표시 ★
         if has_coach_feedback:
             lbl_coach = QLabel(f"💡 Coach: {coach_msg}")
             lbl_coach.setProperty("class", "SectionCoach")
@@ -365,21 +377,24 @@ class TurnWidget(QFrame):
 class FeedbackDisplayWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(FRAME_WIDTH)
-        self.setMaximumHeight(200) 
+        self.setFixedSize(300, 350) # 고정 크기
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.is_default_mode = True 
-        self.setStyleSheet("""
-            FeedbackDisplayWidget { background-color: rgba(15, 15, 20, 0.98); border-radius: 10px; border-left: 4px solid #FFD700; }
-            QLabel { color: #A0AEC0; font-weight: bold; background: transparent; border: none; }
-            QPushButton { background-color: #2D3748; color: #E2E8F0; font-weight: bold; font-size: 16px; padding: 0px; border: 1px solid #4A5568; border-radius: 5px; }
-            QPushButton:hover { background-color: #4A5568; }
-            QPushButton:disabled { background-color: #1A202C; color: #4A5568; border: 1px solid #2D3748; }
-            QTextEdit { background-color: transparent; border: none; color: #FFD700; font-size: 14px; font-weight: bold; selection-background-color: #5D5FEF; }
+        
+        # [FONT FIX] f-string 적용
+        self.setStyleSheet(f"""
+            FeedbackDisplayWidget {{ font-family: '{FONT_FAMILY_NANUM}'; background-color: rgba(15, 15, 20, 0.98); border-radius: 10px; border-left: 4px solid #FFD700; }}
+            QLabel {{ font-family: '{FONT_FAMILY_NANUM}'; color: #A0AEC0; font-weight: bold; background: transparent; border: none; }}
+            QPushButton {{ background-color: #2D3748; color: #E2E8F0; font-weight: bold; font-size: 16px; padding: 0px; border: 1px solid #4A5568; border-radius: 5px; }}
+            QPushButton:hover {{ background-color: #4A5568; }}
+            QPushButton:disabled {{ background-color: #1A202C; color: #4A5568; border: 1px solid #2D3748; }}
+            QTextEdit {{ font-family: '{FONT_FAMILY_NANUM}'; background-color: transparent; border: none; color: #FFD700; font-size: 14px; font-weight: bold; selection-background-color: #5D5FEF; }}
         """)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        # [수정] top margin 30 적용
+        layout.setContentsMargins(10, 30, 10, 10)
         layout.setSpacing(5)
+        
         nav_layout = QHBoxLayout()
         self.btn_prev = QPushButton("◀")
         self.btn_prev.setFixedSize(30, 25)
@@ -392,10 +407,12 @@ class FeedbackDisplayWidget(QWidget):
         self.btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_next.clicked.connect(self.show_next)
         nav_layout.addWidget(self.btn_prev); nav_layout.addWidget(self.lbl_counter); nav_layout.addWidget(self.btn_next)
+        
         self.text_view = QTextEdit()
         self.text_view.setReadOnly(True)
         self.text_view.setMinimumHeight(80) 
         layout.addLayout(nav_layout); layout.addWidget(self.text_view)
+        
         self.history = []; self.current_index = -1; self.refresh_ui()
 
     def set_mode(self, is_default): self.is_default_mode = is_default; self.refresh_ui()
@@ -425,10 +442,164 @@ class FeedbackDisplayWidget(QWidget):
             self.btn_prev.setEnabled(self.current_index > 0)
             self.btn_next.setEnabled(self.current_index < total - 1)
 
+
+class DetailedFeedbackTab(QWidget):
+    """질문별 상세 피드백을 표시하는 탭 위젯"""
+
+    def __init__(self, feedback_data: list, parent=None):
+        super().__init__(parent)
+        self.feedback_data = feedback_data
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        # 스크롤 영역 생성
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        # [FONT FIX] f-string 적용
+        scroll.setStyleSheet(f"QScrollArea {{ font-family: '{FONT_FAMILY_NANUM}'; border: none; background-color: transparent; }}")
+
+        content = QWidget()
+        # [FONT FIX] f-string 적용
+        content.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; background-color: transparent;")
+        content_layout = QVBoxLayout(content)
+        content_layout.setSpacing(20)
+
+        for i, item in enumerate(self.feedback_data):
+            card = self._create_feedback_card(i + 1, item)
+            content_layout.addWidget(card)
+
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+
+    def _create_feedback_card(self, num: int, data: dict) -> QFrame:
+        """개별 질문에 대한 피드백 카드 생성"""
+        card = QFrame()
+        # [FONT FIX] f-string 적용
+        card.setStyleSheet(f"""
+            QFrame {{
+                font-family: '{FONT_FAMILY_NANUM}';
+                background-color: #2D3748;
+                border-radius: 10px;
+                padding: 15px;
+            }}
+        """)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setSpacing(12)
+
+        # 질문 헤더 (전체 질문 표시)
+        question_text = data.get('question', '')
+        header = QLabel(f"Q{num}. {question_text}")
+        header.setWordWrap(True)
+        header.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; font-size: 16px; font-weight: bold; color: #63B3ED;")
+        card_layout.addWidget(header)
+
+        # 내 답변 (접을 수 있는 영역)
+        my_answer_label = QLabel("📝 내 답변")
+        my_answer_label.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; font-size: 13px; font-weight: bold; color: #A0AEC0; margin-top: 5px;")
+        card_layout.addWidget(my_answer_label)
+
+        my_answer = QLabel(data.get('user_answer', '답변 없음'))
+        my_answer.setWordWrap(True)
+        my_answer.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; font-size: 14px; color: #CBD5E0; padding: 10px; background-color: #1A202C; border-radius: 5px;")
+        card_layout.addWidget(my_answer)
+
+        # 질문 의도
+        intent_label = QLabel("🎯 질문 의도")
+        intent_label.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; font-size: 13px; font-weight: bold; color: #F6E05E; margin-top: 10px;")
+        card_layout.addWidget(intent_label)
+
+        intent_text = QLabel(data.get('question_intent', '분석 없음'))
+        intent_text.setWordWrap(True)
+        intent_text.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; font-size: 14px; color: #E2E8F0; padding: 10px; background-color: #4A5568; border-radius: 5px;")
+        card_layout.addWidget(intent_text)
+
+        # 답변 분석
+        analysis_label = QLabel("📊 답변 분석")
+        analysis_label.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; font-size: 13px; font-weight: bold; color: #68D391; margin-top: 10px;")
+        card_layout.addWidget(analysis_label)
+
+        analysis_text = QLabel(data.get('answer_analysis', '분석 없음'))
+        analysis_text.setWordWrap(True)
+        analysis_text.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; font-size: 14px; color: #E2E8F0; padding: 10px; background-color: #4A5568; border-radius: 5px;")
+        card_layout.addWidget(analysis_text)
+
+        # 예시 답안 (하이라이트)
+        example_label = QLabel("💡 예시 답안")
+        example_label.setStyleSheet(f"font-family: '{FONT_FAMILY_NANUM}'; font-size: 13px; font-weight: bold; color: #4FD1C5; margin-top: 10px;")
+        card_layout.addWidget(example_label)
+
+        example_text = QLabel(data.get('example_answer', '예시 답안 없음'))
+        example_text.setWordWrap(True)
+        example_text.setStyleSheet(f"""
+            font-family: '{FONT_FAMILY_NANUM}';
+            font-size: 14px;
+            color: #E2E8F0;
+            padding: 15px;
+            background-color: #234E52;
+            border-radius: 5px;
+            border-left: 4px solid #4FD1C5;
+        """)
+        card_layout.addWidget(example_text)
+
+        return card
+
+
 class IntroPage(QWidget):
     submitted = pyqtSignal(str); go_to_options = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
+        # [폰트 적용] IntroPage 전체에 NanumSquare 폰트 적용
+        self.setStyleSheet(f"""
+            QWidget {{
+                font-family: '{FONT_FAMILY_NANUM}';
+                color: #E2E8F0;
+                font-size: 14px;
+            }}
+            /* 다른 위젯 스타일은 GLOBAL_STYLE 상속 안받으므로 여기서 재정의 필요할 수 있음 */
+            QFrame.Card {{
+                background-color: #151921;
+                border: 1px solid #2D3748;
+                border-radius: 15px;
+            }}
+            QLabel.Title {{
+                color: white;
+                font-size: 26px;
+                font-weight: bold;
+            }}
+            QLabel.Subtitle {{
+                color: #A0AEC0;
+                font-size: 14px;
+            }}
+            QPushButton {{
+                background-color: #5D5FEF;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 12px;
+                font-weight: bold;
+                font-size: 14px;
+            }}
+            QPushButton.Secondary {{
+                background-color: #2D3748;
+                color: #A0AEC0;
+            }}
+            QTextEdit {{
+                font-family: '{FONT_FAMILY_NANUM}';
+                background-color: #1A202C;
+                border: 2px dashed #4A5568;
+                border-radius: 12px;
+                color: #CBD5E0;
+                padding: 15px;
+                font-size: 15px;
+            }}
+        """)
+
         main_layout = QVBoxLayout(self); main_layout.setContentsMargins(20, 20, 20, 20); main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card = QFrame(); card.setProperty("class", "Card"); card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         card_layout = QVBoxLayout(card); card_layout.setSpacing(20); card_layout.setContentsMargins(50, 50, 50, 50)
@@ -440,8 +611,8 @@ class IntroPage(QWidget):
         header_layout.addLayout(text_layout); header_layout.addStretch(); header_layout.addWidget(btn_options)
         card_layout.addLayout(header_layout); card_layout.addSpacing(10)
         upload_layout = QHBoxLayout()
-        lbl_upload = QLabel("Resume / Introduction"); lbl_upload.setStyleSheet("font-weight: bold; color: #CBD5E0; font-size: 16px;")
-        btn_file_upload = QPushButton("📂 파일 불러오기 (.txt)"); btn_file_upload.setFixedSize(160, 40); btn_file_upload.setStyleSheet("background-color: #2D3748; font-size: 13px;"); btn_file_upload.clicked.connect(self.open_file_dialog)
+        lbl_upload = QLabel("Resume / Introduction"); lbl_upload.setStyleSheet(f"font-weight: bold; color: #CBD5E0; font-size: 16px; font-family: '{FONT_FAMILY_NANUM}';")
+        btn_file_upload = QPushButton("📂 파일 불러오기 (.txt)"); btn_file_upload.setFixedSize(160, 40); btn_file_upload.setStyleSheet(f"background-color: #2D3748; font-size: 13px; font-family: '{FONT_FAMILY_NANUM}';"); btn_file_upload.clicked.connect(self.open_file_dialog)
         upload_layout.addWidget(lbl_upload); upload_layout.addStretch(); upload_layout.addWidget(btn_file_upload)
         card_layout.addLayout(upload_layout)
         self.text_edit = QTextEdit(); self.text_edit.setPlaceholderText("여기에 자기소개서를 입력하거나 '파일 불러오기'를 사용하세요..."); self.text_edit.setAcceptRichText(False); self.text_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding); card_layout.addWidget(self.text_edit)
@@ -455,107 +626,125 @@ class IntroPage(QWidget):
             except Exception as e: self.text_edit.setText(f"[오류] {e}")
     def on_submit(self):
         text = self.text_edit.toPlainText()
-        if text.strip():
-            # [Fix] 설정값(질문 개수)을 메인 윈도우에서 가져옴
-            main_window = self.window() # 부모 위젯 탐색
+        # [수정] 개발자 모드면 더미 데이터 전송 후 바로 이동
+        if self.window().dev_mode:
+            print("[DevMode] Intro submitted (Mock)")
+            QTimer.singleShot(2000, lambda: self._mock_intro_done())
+        elif text.strip():
+            main_window = self.window()
             q_count = 3
-            if main_window:
-                q_count = main_window.expected_questions
-
-            # 자소서와 함께 설정값 전송
-            payload = {
-                "type": "text",
-                "data": text,
-                "config": {"question_count": q_count} # [New] 설정값 추가
-            }
-            self.submitted.emit(json.dumps(payload)) # JSON 문자열로 방출
+            if main_window: q_count = main_window.expected_questions
+            payload = { "type": "text", "data": text, "config": {"question_count": q_count} }
+            self.submitted.emit(json.dumps(payload))
+            
+    def _mock_intro_done(self):
+        self.submitted.emit("mock_data") # triggers loading overlay in MainWindow
+        
     def on_options(self): self.go_to_options.emit()
+
 
 class InterviewOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        # 새 턴 감지용 플래그 (True면 텍스트 교체, False면 이어붙이기)
-        self.expecting_new_ai_turn = True 
+        self.top_bar_height = 100
+        self.bottom_bar_height = 120
+        self.expecting_new_ai_turn = True
         
         layout = QGridLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
+        layout.setContentsMargins(30, 10, 20, 10)
+
+        # 1. AI 텍스트
         self.lbl_ai_text = QLabel("AI 면접관 연결 중...")
-        self.lbl_ai_text.setStyleSheet("""
-            background-color: rgba(255, 255, 255, 0.95);
-            color: #1A202C;
-            padding: 20px;
-            border-radius: 20px;
-            border-bottom-left-radius: 0px;
+        self.lbl_ai_text.setStyleSheet(f"""
+            color: #1A202C; 
+            font-family: '{FONT_FAMILY_NANUM}';
             font-size: 18px;
             font-weight: 600;
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 10px;
+            border-radius: 15px;
         """)
         self.lbl_ai_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.lbl_ai_text.setWordWrap(True)
-        self.lbl_ai_text.setMinimumHeight(80)
-        self.lbl_ai_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.lbl_ai_text.setFixedHeight(self.top_bar_height - 20) 
+        self.lbl_ai_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.lbl_ai_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         
         layout.addWidget(self.lbl_ai_text, 0, 0, 1, 12)
         layout.setRowStretch(1, 1)
-        
+
+        # 2. 피드백 위젯 (우측 상단)
         self.feedback_widget = FeedbackDisplayWidget(self)
         self.feedback_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        layout.addWidget(self.feedback_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
-        
+        layout.addWidget(self.feedback_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
+
+        # 3. 웹캠 위젯 (우측 하단)
         self.webcam_widget = WebcamFeedbackWidget(self)
         self.webcam_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        layout.addWidget(self.webcam_widget, 2, 8, 2, 4, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
-        
+        layout.addWidget(self.webcam_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+
+        # 4. 사용자 텍스트 (하단)
         self.lbl_user_text = QLabel("")
-        self.lbl_user_text.setStyleSheet("""
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 15px;
-            font-size: 16px;
+        self.lbl_user_text.setStyleSheet(f"""
+            color: #63B3ED; 
+            font-family: '{FONT_FAMILY_NANUM}';
+            font-size: 18px;
+            font-weight: 500;
+            background-color: transparent;
+            padding: 10px;
         """)
         self.lbl_user_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_user_text.setWordWrap(True)
+        self.lbl_user_text.setFixedHeight(self.bottom_bar_height - 20)
         self.lbl_user_text.hide()
         self.lbl_user_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        layout.addWidget(self.lbl_user_text, 4, 1, 1, 10)
+        
+        layout.addWidget(self.lbl_user_text, 2, 0, 1, 12)
 
-    def set_feedback_mode(self, is_default):
-        self.feedback_widget.set_mode(is_default)
+        self.user_text_timer = QTimer()
+        self.user_text_timer.setSingleShot(True)
+        self.user_text_timer.timeout.connect(self.fade_out_user_text)
 
-    def update_ai_text(self, text):
-        # [핵심 로직]
-        # 새 턴이거나 초기 상태라면 -> 텍스트 교체 (덮어쓰기)
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w = self.width(); h = self.height()
+        bg_color = QColor(11, 14, 20, 255) 
+        line_color = QColor(93, 95, 239)   
+        
+        painter.fillRect(0, 0, w, self.top_bar_height, bg_color)
+        painter.setPen(QPen(line_color, 2))
+        painter.drawLine(0, self.top_bar_height, w, self.top_bar_height)
+        
+        painter.fillRect(0, h - self.bottom_bar_height, w, self.bottom_bar_height, bg_color)
+        painter.drawLine(0, h - self.bottom_bar_height, w, h - self.bottom_bar_height)
+
+    def set_feedback_mode(self, is_default): self.feedback_widget.set_mode(is_default)
+    
+    def update_ai_text(self, text): 
         if self.expecting_new_ai_turn:
-            self.lbl_ai_text.setText(text)
-            self.expecting_new_ai_turn = False # 이제부터는 이어붙이기 모드
+            self.lbl_ai_text.setText(f"🤖 {text}")
+            self.expecting_new_ai_turn = False
         else:
-            # 같은 턴 내의 문장이라면 -> 이어 붙이기
             current = self.lbl_ai_text.text()
-            # 중복 전송 방지 및 띄어쓰기 추가
-            if not current.endswith(text): 
+            if not current.endswith(text):
                 self.lbl_ai_text.setText(current + " " + text)
 
     def update_user_text(self, text):
         if text:
-            self.lbl_user_text.setText(f"{text}")
+            self.lbl_user_text.setText(f"User: {text}")
             self.lbl_user_text.show()
-            QTimer.singleShot(3000, self.lbl_user_text.hide)
-            
-            # [핵심 로직] 사용자가 말을 했으니, 다음 AI 멘트는 '새로운 질문'임
-            self.expecting_new_ai_turn = True
+            self.user_text_timer.start(6000) 
+            self.expecting_new_ai_turn = True # 답변했으니 다음은 새 질문
 
-    def update_webcam(self, pixmap):
-        self.webcam_widget.update_frame(pixmap)
+    def fade_out_user_text(self): self.lbl_user_text.hide(); self.lbl_user_text.setText("")
+    def update_webcam(self, pixmap): self.webcam_widget.update_frame(pixmap)
+    def show_realtime_feedback(self, text): self.feedback_widget.add_feedback(text)
+    def set_webcam_border(self, color): self.webcam_widget.set_border_color(color)
 
-    def show_realtime_feedback(self, text):
-        self.feedback_widget.add_feedback(text)
 
-    def set_webcam_border(self, color):
-        self.webcam_widget.set_border_color(color)
-        
 class InterviewPage(QWidget):
     def __init__(self):
         super().__init__()
@@ -575,8 +764,9 @@ class InterviewPage(QWidget):
     def update_user_text(self, text): self.overlay.update_user_text(text)
     def update_webcam_frame(self, q_img): self.overlay.update_webcam(QPixmap.fromImage(q_img))
     def show_realtime_feedback(self, text): self.overlay.show_realtime_feedback(text)
+    def set_webcam_border(self, color): self.overlay.set_webcam_border(color)
     def start_video(self):
-        if self.bg_timer: self.bg_timer.start(50)
+        if self.bg_timer: self.bg_timer.start(50) 
     def stop_video(self):
         if self.bg_timer: self.bg_timer.stop()
     def update_background_frame(self):
@@ -585,764 +775,211 @@ class InterviewPage(QWidget):
         ret, frame = active_cap.read()
         if not ret: active_cap.set(cv2.CAP_PROP_POS_FRAMES, 0); ret, frame = active_cap.read(); 
         if not ret: return
+        
+        # Center Crop
+        h, w, _ = frame.shape
+        if w == 1920:
+            start_x = 240; end_x = 1920 - 240
+            frame = frame[:, start_x:end_x]
+            
         frame = cv2.resize(frame, (1280, 800)) 
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = frame.shape
         self.bg_label.setPixmap(QPixmap.fromImage(QImage(frame.data, w, h, ch * w, QImage.Format.Format_RGB888)))
-    def set_webcam_border(self, color): self.overlay.set_webcam_border(color)
 
-# ==========================================
-# [NEW] 종합 레포트 팝업창 (차트 포함)
-# ==========================================
 class SimpleLineChartWidget(QWidget):
     def __init__(self, data_list, colors, parent=None):
         super().__init__(parent)
-        self.data = data_list # list of dict: {label: [values...]}
-        self.colors = colors
-        self.setMinimumHeight(280)  # 200 → 280 (차트 높이 증가)
+        self.data = data_list; self.colors = colors
+        self.setMinimumHeight(200)
         self.setStyleSheet("background-color: #2D3748; border-radius: 8px;")
-
     def paintEvent(self, event):
         if not self.data: return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        margin_top = 20
-        margin_bottom = 50  # 범례 공간 확보
-        margin_left = 40
-        margin_right = 20
-
-        w = self.width() - margin_left - margin_right
-        h = self.height() - margin_top - margin_bottom
-
-        # Axis lines
-        painter.setPen(QPen(QColor("#A0AEC0"), 2))
-        painter.drawLine(margin_left, margin_top, margin_left, margin_top + h) # Y axis
-        painter.drawLine(margin_left, margin_top + h, margin_left + w, margin_top + h) # X axis
-
-        # Center line (Z=0)
-        mid_y = margin_top + h / 2
-        painter.setPen(QPen(QColor("#718096"), 1, Qt.PenStyle.DashLine))
-        painter.drawLine(margin_left, int(mid_y), margin_left + w, int(mid_y))
-
-        # Y축 레이블 (+3, 0, -3)
-        painter.setPen(QColor("#A0AEC0"))
-        painter.setFont(QFont("Segoe UI", 8))
-        painter.drawText(5, margin_top + 5, "+3")
-        painter.drawText(5, int(mid_y) + 4, "0")
-        painter.drawText(5, margin_top + h - 2, "-3")
-
+        painter = QPainter(self); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.setFont(QFont(FONT_FAMILY_NANUM, 9))
+        margin = 30; w = self.width() - 2 * margin; h = self.height() - 2 * margin
+        painter.setPen(QPen(QColor("#A0AEC0"), 2)); painter.drawLine(margin, margin, margin, margin + h); painter.drawLine(margin, margin + h, margin + w, margin + h)
+        mid_y = margin + h / 2; painter.setPen(QPen(QColor("#718096"), 1, Qt.PenStyle.DashLine)); painter.drawLine(margin, int(mid_y), margin + w, int(mid_y))
         num_points = 0
+        for item in self.data: num_points = max(num_points, len(item['values']))
+        if num_points < 2: return
+        step_x = w / (num_points - 1); idx = 0
         for item in self.data:
-            num_points = max(num_points, len(item['values']))
-
-        if num_points < 2: return # Need at least 2 points to draw line
-
-        step_x = w / (num_points - 1)
-
-        # Plot each line
-        idx = 0
-        for item in self.data:
-            vals = item['values']
-            lbl = item['label']
-            color = self.colors[idx % len(self.colors)]
-
-            painter.setPen(QPen(color, 2))
-            path = QPainterPath()
-
+            vals = item['values']; lbl = item['label']; color = self.colors[idx % len(self.colors)]
+            painter.setPen(QPen(color, 2)); path = QPainterPath()
             for i, val in enumerate(vals):
-                # Z-score range approx -3 to +3
-                # Map -3 -> bottom, +3 -> top
                 normalized_val = max(-3, min(3, val))
-                px = margin_left + i * step_x
-                py = mid_y - (normalized_val / 3.0) * (h / 2)
-
+                px = margin + i * step_x; py = mid_y - (normalized_val / 3.0) * (h / 2)
                 if i == 0: path.moveTo(px, py)
                 else: path.lineTo(px, py)
-
-                # Draw point
-                painter.setBrush(QBrush(color))
-                painter.drawEllipse(QPointF(px, py), 4, 4)
-
-            # 브러시 비활성화 후 선만 그리기 (면 채움 방지)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setBrush(QBrush(color)); painter.drawEllipse(QPointF(px, py), 3, 3)
             painter.drawPath(path)
-            idx += 1
-
-        # 범례 (차트 아래에 가로 배치)
-        legend_y = self.height() - 25
-        legend_x_start = margin_left
-        legend_spacing = max(100, w // max(len(self.data), 1))  # 동적 간격
-
-        for idx, item in enumerate(self.data):
-            color = self.colors[idx % len(self.colors)]
-            lbl = item['label']
-            x_pos = legend_x_start + (idx * legend_spacing)
-
-            # 범례 색상 박스
-            painter.setBrush(QBrush(color))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRect(int(x_pos), legend_y - 8, 12, 12)
-
-            # 범례 텍스트
-            painter.setPen(QColor("#E2E8F0"))
-            painter.setFont(QFont("Segoe UI", 9))
-            painter.drawText(int(x_pos) + 16, legend_y + 2, lbl)
+            painter.setPen(QColor("white")); painter.drawText(margin + 10 + (idx * 100), margin - 10, lbl); idx += 1
 
 class AverageZScoreChartWidget(QWidget):
     def __init__(self, avg_data, parent=None):
         super().__init__(parent)
-        self.avg_data = avg_data # dict {feature: avg_z}
-        self.setMinimumHeight(320)  # 250 → 320 (차트 높이 증가)
+        self.avg_data = avg_data; self.setMinimumHeight(250)
         self.setStyleSheet("background-color: #2D3748; border-radius: 8px;")
-
     def paintEvent(self, event):
         if not self.avg_data: return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        margin_left = 100
-        margin_right = 30
-        margin_top = 20
-        margin_bottom = 20
-        
-        w = self.width() - margin_left - margin_right
-        h = self.height() - margin_top - margin_bottom
-        
-        keys = list(self.avg_data.keys())
-        bar_height = h / len(keys)
-        mid_x = margin_left + w / 2
-        
-        # Center Line
-        painter.setPen(QPen(QColor("#A0AEC0"), 1))
-        painter.drawLine(int(mid_x), margin_top, int(mid_x), int(margin_top + h))
-        
+        painter = QPainter(self); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.setFont(QFont(FONT_FAMILY_NANUM, 9))
+        margin_left = 100; margin_right = 30; margin_top = 20; margin_bottom = 20
+        w = self.width() - margin_left - margin_right; h = self.height() - margin_top - margin_bottom
+        keys = list(self.avg_data.keys()); bar_height = h / len(keys); mid_x = margin_left + w / 2
+        painter.setPen(QPen(QColor("#A0AEC0"), 1)); painter.drawLine(int(mid_x), margin_top, int(mid_x), int(margin_top + h))
         for i, key in enumerate(keys):
-            z = self.avg_data[key]
-            z = max(-3, min(3, z)) # clamp
-            
-            y_pos = margin_top + i * bar_height + 5
-            bar_h = bar_height - 10
-            
-            bar_len = (z / 3.0) * (w / 2)
-            
-            # Label
-            painter.setPen(QColor("white"))
-            painter.setFont(QFont("Segoe UI", 9))
-            painter.drawText(QRectF(0, y_pos, margin_left - 10, bar_h), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, key)
-            
-            # Bar
-            if z >= 0:
-                rect = QRectF(mid_x, y_pos, bar_len, bar_h)
-                color = QColor("#68D391") # Green for positive
-            else:
-                rect = QRectF(mid_x + bar_len, y_pos, -bar_len, bar_h)
-                color = QColor("#F56565") # Red for negative
-                
-            painter.setBrush(QBrush(color))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRect(rect)
-            
-            # Value Text
-            text_x = mid_x + bar_len + (5 if z >= 0 else -35)
-            painter.setPen(QColor("white"))
-            painter.drawText(int(text_x), int(y_pos + bar_h/1.5), f"{z:.2f}")
-
-# ==========================================
-# [NEW] DetailedFeedbackTab - 질문별 상세 피드백
-# ==========================================
-class DetailedFeedbackTab(QWidget):
-    """질문별 상세 피드백을 표시하는 탭 위젯"""
-
-    def __init__(self, feedback_data: list, parent=None):
-        super().__init__(parent)
-        self.feedback_data = feedback_data
-        self._init_ui()
-
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-
-        # 스크롤 영역 생성
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
-
-        content = QWidget()
-        content.setStyleSheet("background-color: transparent;")
-        content_layout = QVBoxLayout(content)
-        content_layout.setSpacing(20)
-
-        for i, item in enumerate(self.feedback_data):
-            card = self._create_feedback_card(i + 1, item)
-            content_layout.addWidget(card)
-
-        content_layout.addStretch()
-        scroll.setWidget(content)
-        layout.addWidget(scroll)
-
-    def _create_feedback_card(self, num: int, data: dict) -> QFrame:
-        """개별 질문에 대한 피드백 카드 생성"""
-        card = QFrame()
-        card.setStyleSheet("""
-            QFrame {
-                background-color: #2D3748;
-                border-radius: 10px;
-                padding: 15px;
-            }
-        """)
-
-        card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(12)
-
-        # 질문 헤더 (전체 질문 표시)
-        question_text = data.get('question', '')
-        header = QLabel(f"Q{num}. {question_text}")
-        header.setWordWrap(True)
-        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #63B3ED;")
-        card_layout.addWidget(header)
-
-        # 내 답변 (접을 수 있는 영역)
-        my_answer_label = QLabel("📝 내 답변")
-        my_answer_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #A0AEC0; margin-top: 5px;")
-        card_layout.addWidget(my_answer_label)
-
-        my_answer = QLabel(data.get('user_answer', '답변 없음'))
-        my_answer.setWordWrap(True)
-        my_answer.setStyleSheet("font-size: 14px; color: #CBD5E0; padding: 10px; background-color: #1A202C; border-radius: 5px;")
-        card_layout.addWidget(my_answer)
-
-        # 질문 의도
-        intent_label = QLabel("🎯 질문 의도")
-        intent_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #F6E05E; margin-top: 10px;")
-        card_layout.addWidget(intent_label)
-
-        intent_text = QLabel(data.get('question_intent', '분석 없음'))
-        intent_text.setWordWrap(True)
-        intent_text.setStyleSheet("font-size: 14px; color: #E2E8F0; padding: 10px; background-color: #4A5568; border-radius: 5px;")
-        card_layout.addWidget(intent_text)
-
-        # 답변 분석
-        analysis_label = QLabel("📊 답변 분석")
-        analysis_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #68D391; margin-top: 10px;")
-        card_layout.addWidget(analysis_label)
-
-        analysis_text = QLabel(data.get('answer_analysis', '분석 없음'))
-        analysis_text.setWordWrap(True)
-        analysis_text.setStyleSheet("font-size: 14px; color: #E2E8F0; padding: 10px; background-color: #4A5568; border-radius: 5px;")
-        card_layout.addWidget(analysis_text)
-
-        # 예시 답안 (하이라이트)
-        example_label = QLabel("💡 예시 답안")
-        example_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #4FD1C5; margin-top: 10px;")
-        card_layout.addWidget(example_label)
-
-        example_text = QLabel(data.get('example_answer', '예시 답안 없음'))
-        example_text.setWordWrap(True)
-        example_text.setStyleSheet("""
-            font-size: 14px;
-            color: #E2E8F0;
-            padding: 15px;
-            background-color: #234E52;
-            border-radius: 5px;
-            border-left: 4px solid #4FD1C5;
-        """)
-        card_layout.addWidget(example_text)
-
-        return card
-
-# ==========================================
-# [NEW] SkillsAnalysisTab - 역량 분석 및 직무 추천
-# ==========================================
-class SkillsAnalysisTab(QWidget):
-    """역량 분석 및 직무 추천을 표시하는 탭 위젯"""
-
-    def __init__(self, skills_data: dict, parent=None):
-        super().__init__(parent)
-        self.skills_data = skills_data or {}
-        self._init_ui()
-
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
-
-        # 스크롤 영역 생성
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
-
-        content = QWidget()
-        content.setStyleSheet("background-color: transparent;")
-        content_layout = QVBoxLayout(content)
-        content_layout.setSpacing(25)
-
-        # Section 0: 스킬 추출 기준 안내 (있는 경우)
-        extraction_criteria = self.skills_data.get('extraction_criteria', '')
-        if extraction_criteria:
-            criteria_frame = QFrame()
-            criteria_frame.setStyleSheet("""
-                QFrame {
-                    background-color: #4A5568;
-                    border-radius: 8px;
-                    padding: 12px;
-                    border-left: 4px solid #F6E05E;
-                }
-            """)
-            criteria_layout = QVBoxLayout(criteria_frame)
-            criteria_layout.setContentsMargins(10, 8, 10, 8)
-
-            criteria_label = QLabel(f"📌 스킬 추출 기준: {extraction_criteria}")
-            criteria_label.setWordWrap(True)
-            criteria_label.setStyleSheet("font-size: 13px; color: #E2E8F0;")
-            criteria_layout.addWidget(criteria_label)
-            content_layout.addWidget(criteria_frame)
-
-        # Section 1: 소프트 스킬
-        soft_skills = self.skills_data.get('soft_skills', [])
-        soft_group = self._create_skills_section("🌟 소프트 스킬 (Soft Skills)", soft_skills, "#68D391")
-        content_layout.addWidget(soft_group)
-
-        # Section 2: 하드 스킬
-        hard_skills = self.skills_data.get('hard_skills', [])
-        hard_group = self._create_skills_section("⚙️ 하드 스킬 (Hard Skills)", hard_skills, "#63B3ED")
-        content_layout.addWidget(hard_group)
-
-        # Section 3: 추천 직무
-        jobs = self.skills_data.get('recommended_jobs', [])
-        jobs_group = self._create_jobs_section("🎯 추천 직무 (Recommended Jobs)", jobs)
-        content_layout.addWidget(jobs_group)
-
-        content_layout.addStretch()
-        scroll.setWidget(content)
-        layout.addWidget(scroll)
-
-    def _create_skills_section(self, title: str, skills: list, color: str) -> QFrame:
-        """스킬 섹션 (태그 + 근거 형태) 생성"""
-        frame = QFrame()
-        frame.setStyleSheet("""
-            QFrame {
-                background-color: #2D3748;
-                border-radius: 10px;
-                padding: 15px;
-            }
-        """)
-
-        frame_layout = QVBoxLayout(frame)
-        frame_layout.setSpacing(15)
-
-        # 제목
-        title_label = QLabel(title)
-        title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {color};")
-        frame_layout.addWidget(title_label)
-
-        if skills:
-            for skill_item in skills:
-                # 새 형식 (dict) vs 구 형식 (str) 처리
-                if isinstance(skill_item, dict):
-                    skill_name = skill_item.get('skill', '')
-                    evidence = skill_item.get('evidence', '')
-                else:
-                    skill_name = str(skill_item)
-                    evidence = ''
-
-                # 스킬 카드 컨테이너
-                skill_card = QFrame()
-                skill_card.setStyleSheet("""
-                    QFrame {
-                        background-color: #1A202C;
-                        border-radius: 8px;
-                        padding: 10px;
-                    }
-                """)
-                card_layout = QHBoxLayout(skill_card)
-                card_layout.setContentsMargins(10, 8, 10, 8)
-                card_layout.setSpacing(12)
-
-                # 스킬 태그
-                tag = QLabel(skill_name)
-                tag.setStyleSheet(f"""
-                    font-size: 14px;
-                    color: #1A202C;
-                    background-color: {color};
-                    padding: 6px 14px;
-                    border-radius: 12px;
-                    font-weight: bold;
-                """)
-                tag.setFixedHeight(32)
-                card_layout.addWidget(tag)
-
-                # 근거 텍스트 (있는 경우)
-                if evidence:
-                    evidence_label = QLabel(f"📝 {evidence}")
-                    evidence_label.setWordWrap(True)
-                    evidence_label.setStyleSheet("font-size: 12px; color: #A0AEC0;")
-                    card_layout.addWidget(evidence_label, 1)  # stretch factor
-                else:
-                    card_layout.addStretch()
-
-                frame_layout.addWidget(skill_card)
-        else:
-            no_data = QLabel("추출된 스킬이 없습니다.")
-            no_data.setStyleSheet("color: #718096; font-style: italic;")
-            frame_layout.addWidget(no_data)
-
-        return frame
-
-    def _create_jobs_section(self, title: str, jobs: list) -> QFrame:
-        """추천 직무 섹션 생성"""
-        frame = QFrame()
-        frame.setStyleSheet("""
-            QFrame {
-                background-color: #2D3748;
-                border-radius: 10px;
-                padding: 15px;
-            }
-        """)
-
-        frame_layout = QVBoxLayout(frame)
-        frame_layout.setSpacing(15)
-
-        # 제목
-        title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #F6E05E;")
-        frame_layout.addWidget(title_label)
-
-        if jobs:
-            for i, job in enumerate(jobs):
-                job_card = self._create_job_card(i + 1, job)
-                frame_layout.addWidget(job_card)
-        else:
-            no_data = QLabel("추천 직무가 없습니다.")
-            no_data.setStyleSheet("color: #718096; font-style: italic;")
-            frame_layout.addWidget(no_data)
-
-        return frame
-
-    def _create_job_card(self, num: int, job: dict) -> QFrame:
-        """개별 직무 추천 카드 생성"""
-        card = QFrame()
-        card.setStyleSheet("""
-            QFrame {
-                background-color: #4A5568;
-                border-radius: 8px;
-                padding: 12px;
-            }
-        """)
-
-        card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(8)
-
-        # 직무명
-        job_title = job.get('title', '직무명 없음')
-        title_label = QLabel(f"#{num} {job_title}")
-        title_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #F6E05E;")
-        card_layout.addWidget(title_label)
-
-        # 매칭 이유
-        match_reason = job.get('match_reason', '매칭 이유 없음')
-        reason_label = QLabel(f"📋 {match_reason}")
-        reason_label.setWordWrap(True)
-        reason_label.setStyleSheet("font-size: 13px; color: #E2E8F0;")
-        card_layout.addWidget(reason_label)
-
-        return card
+            z = self.avg_data[key]; z = max(-3, min(3, z))
+            y_pos = margin_top + i * bar_height + 5; bar_h = bar_height - 10; bar_len = (z / 3.0) * (w / 2)
+            painter.setPen(QColor("white")); painter.drawText(QRectF(0, y_pos, margin_left - 10, bar_h), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, key)
+            if z >= 0: rect = QRectF(mid_x, y_pos, bar_len, bar_h); color = QColor("#68D391")
+            else: rect = QRectF(mid_x + bar_len, y_pos, -bar_len, bar_h); color = QColor("#F56565")
+            painter.setBrush(QBrush(color)); painter.setPen(Qt.PenStyle.NoPen); painter.drawRect(rect)
+            text_x = mid_x + bar_len + (5 if z >= 0 else -35); painter.setPen(QColor("white")); painter.drawText(int(text_x), int(y_pos + bar_h/1.5), f"{z:.2f}")
 
 class SummaryReportDialog(QDialog):
     def __init__(self, logs, report_data, parent=None):
-        """
-        report_data: V2 형식 (dict) 또는 V1 형식 (str)
-        - V2: {"llm_summary": str, "detailed_feedback": list, "skills_analysis": dict}
-        - V1: str (마크다운 형식의 총평)
-        """
         super().__init__(parent)
         self.setWindowTitle("종합 면접 레포트")
-        self.resize(900, 750)  # 새 탭을 위해 크기 조정
+        self.resize(900, 750) 
         self.setStyleSheet(GLOBAL_STYLE + "QDialog { background-color: #1A202C; }")
-
+        
         layout = QVBoxLayout(self)
-
         title = QLabel("📊 Comprehensive Interview Report")
         title.setProperty("class", "Title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-
-        # 탭 위젯으로 구성
+        
         tabs = QTabWidget()
         layout.addWidget(tabs)
-
+        
         # V1/V2 형식 분기 처리
         if isinstance(report_data, dict):
-            # V2 형식: 구조화된 JSON
             summary_text = report_data.get("llm_summary", "")
             detailed_feedback = report_data.get("detailed_feedback", [])
             skills_analysis = report_data.get("skills_analysis", {})
         else:
-            # V1 형식: 단순 문자열
             summary_text = str(report_data)
             detailed_feedback = []
             skills_analysis = {}
 
-        # 1. Feature Analysis Tab (기존 차트)
-        tab_analysis = QWidget()
-        analysis_layout = QVBoxLayout(tab_analysis)
-        analysis_layout.setSpacing(15)
-
-        # Data Processing
+        tab_analysis = QWidget(); analysis_layout = QVBoxLayout(tab_analysis); analysis_layout.setSpacing(15)
         pos_data, neg_data, all_avgs = self.process_data(logs)
-
-        # ═══════════════════════════════════════════════════
-        # 긍정/부정 차트 병렬 배치 (QHBoxLayout)
-        # ═══════════════════════════════════════════════════
-        charts_row = QHBoxLayout()
-        charts_row.setSpacing(15)
-
-        # 긍정적 요소 차트 (왼쪽)
-        pos_container = QWidget()
-        pos_layout = QVBoxLayout(pos_container)
-        pos_layout.setContentsMargins(0, 0, 0, 0)
-        pos_layout.setSpacing(5)
-
-        lbl_pos = QLabel("📈 긍정적 요소 변화")
-        lbl_pos.setStyleSheet("color: #68D391; font-weight: bold; font-size: 13px;")
-        lbl_pos.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pos_layout.addWidget(lbl_pos)
-
+        
+        charts_row = QHBoxLayout(); charts_row.setSpacing(15)
+        pos_container = QWidget(); pos_layout = QVBoxLayout(pos_container); pos_layout.setContentsMargins(0, 0, 0, 0); pos_layout.setSpacing(5)
+        lbl_pos = QLabel("📈 긍정적 요소 변화"); lbl_pos.setStyleSheet(f"color: #68D391; font-weight: bold; font-size: 13px; font-family: '{FONT_FAMILY_NANUM}';"); lbl_pos.setAlignment(Qt.AlignmentFlag.AlignCenter); pos_layout.addWidget(lbl_pos)
         pos_colors = [QColor("#68D391"), QColor("#4FD1C5"), QColor("#63B3ED"), QColor("#F6E05E")]
-        chart_pos = SimpleLineChartWidget(pos_data, pos_colors)
-        pos_layout.addWidget(chart_pos)
-        charts_row.addWidget(pos_container)
-
-        # 부정적 요소 차트 (오른쪽)
-        neg_container = QWidget()
-        neg_layout = QVBoxLayout(neg_container)
-        neg_layout.setContentsMargins(0, 0, 0, 0)
-        neg_layout.setSpacing(5)
-
-        lbl_neg = QLabel("📉 부정적 요소 변화")
-        lbl_neg.setStyleSheet("color: #F56565; font-weight: bold; font-size: 13px;")
-        lbl_neg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        neg_layout.addWidget(lbl_neg)
-
+        chart_pos = SimpleLineChartWidget(pos_data, pos_colors); pos_layout.addWidget(chart_pos); charts_row.addWidget(pos_container)
+        
+        neg_container = QWidget(); neg_layout = QVBoxLayout(neg_container); neg_layout.setContentsMargins(0, 0, 0, 0); neg_layout.setSpacing(5)
+        lbl_neg = QLabel("📉 부정적 요소 변화"); lbl_neg.setStyleSheet(f"color: #F56565; font-weight: bold; font-size: 13px; font-family: '{FONT_FAMILY_NANUM}';"); lbl_neg.setAlignment(Qt.AlignmentFlag.AlignCenter); neg_layout.addWidget(lbl_neg)
         neg_colors = [QColor("#F56565"), QColor("#FC8181"), QColor("#F687B3"), QColor("#D53F8C")]
-        chart_neg = SimpleLineChartWidget(neg_data, neg_colors)
-        neg_layout.addWidget(chart_neg)
-        charts_row.addWidget(neg_container)
-
+        chart_neg = SimpleLineChartWidget(neg_data, neg_colors); neg_layout.addWidget(chart_neg); charts_row.addWidget(neg_container)
         analysis_layout.addLayout(charts_row)
-
-        # ═══════════════════════════════════════════════════
-        # 전체 평균 분포 차트 (아래쪽, 전체 너비)
-        # ═══════════════════════════════════════════════════
-        lbl_avg = QLabel("📊 전체 평균 분포 (Average Z-Score Distribution)")
-        lbl_avg.setStyleSheet("color: #A0AEC0; font-weight: bold; font-size: 13px; margin-top: 10px;")
-        lbl_avg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        analysis_layout.addWidget(lbl_avg)
-
-        chart_avg = AverageZScoreChartWidget(all_avgs)
-        analysis_layout.addWidget(chart_avg)
-
+        
+        lbl_avg = QLabel("📊 전체 평균 분포 (Average Z-Score Distribution)"); lbl_avg.setStyleSheet(f"color: #A0AEC0; font-weight: bold; font-size: 13px; margin-top: 10px; font-family: '{FONT_FAMILY_NANUM}';"); lbl_avg.setAlignment(Qt.AlignmentFlag.AlignCenter); analysis_layout.addWidget(lbl_avg)
+        chart_avg = AverageZScoreChartWidget(all_avgs); analysis_layout.addWidget(chart_avg)
         tabs.addTab(tab_analysis, "특성 분석")
-
-        # 2. LLM Summary Tab (AI 총평)
-        tab_summary = QWidget()
-        summary_layout_tab = QVBoxLayout(tab_summary)
-        text_edit = QTextEdit()
-        text_edit.setReadOnly(True)
-        text_edit.setMarkdown(summary_text)  # 마크다운 렌더링
-        text_edit.setStyleSheet("font-size: 16px; line-height: 1.5; color: #E2E8F0;")
-        summary_layout_tab.addWidget(text_edit)
+        
+        tab_summary = QWidget(); summary_layout = QVBoxLayout(tab_summary)
+        text_edit = QTextEdit(); text_edit.setReadOnly(True); text_edit.setMarkdown(summary_text)
+        text_edit.setStyleSheet(f"font-size: 16px; line-height: 1.5; color: #E2E8F0; font-family: '{FONT_FAMILY_NANUM}';")
+        summary_layout.addWidget(text_edit)
         tabs.addTab(tab_summary, "AI 총평")
-
-        # 3. Detailed Feedback Tab (질문별 피드백) - V2 전용
+        
         if detailed_feedback:
             feedback_tab = DetailedFeedbackTab(detailed_feedback)
             tabs.addTab(feedback_tab, "질문별 피드백")
 
-        # 4. Skills Analysis Tab (역량 분석) - V2 전용
         if skills_analysis and (skills_analysis.get('soft_skills') or skills_analysis.get('hard_skills') or skills_analysis.get('recommended_jobs')):
             skills_tab = SkillsAnalysisTab(skills_analysis)
             tabs.addTab(skills_tab, "역량 분석")
-
-        btn_ok = QPushButton("닫기")
-        btn_ok.clicked.connect(self.accept)
+        
+        btn_ok = QPushButton("닫기"); btn_ok.clicked.connect(self.accept)
         layout.addWidget(btn_ok, 0, Qt.AlignmentFlag.AlignCenter)
 
     def process_data(self, logs):
-        # Extract Turn-by-turn Z-scores
         turns_metrics = []
         for item in logs:
             if item.get("type") == "feedback":
                 content = item.get("content")
                 if isinstance(content, str):
-                    try: 
-                        json_part = content.replace("Analysis:", "").strip().replace("'", '"').replace("None", "null")
-                        content = json.loads(json_part)
+                    try: content = json.loads(content.replace("Analysis:", "").strip().replace("'", '"').replace("None", "null"))
                     except: content = {}
-                
                 if isinstance(content, dict):
                     mm = content.get("multimodal_features", {})
                     turn_feats = {}
                     for domain in mm.values():
                         if isinstance(domain, dict):
                             for k, v in domain.items():
-                                if isinstance(v, dict):
-                                    turn_feats[k] = v.get("z_score", 0.0)
+                                if isinstance(v, dict): turn_feats[k] = v.get("z_score", 0.0)
                     turns_metrics.append(turn_feats)
         
-        # Organize for Line Charts
         pos_trends = []
         for feat in POSITIVE_FEATURES:
             values = [t.get(feat, 0.0) for t in turns_metrics]
-            if any(v != 0.0 for v in values): # Only add if data exists
-                pos_trends.append({'label': feat, 'values': values})
-                
+            if any(v != 0.0 for v in values): pos_trends.append({'label': feat, 'values': values})
+        
         neg_trends = []
         for feat in NEGATIVE_FEATURES:
             values = [t.get(feat, 0.0) for t in turns_metrics]
-            if any(v != 0.0 for v in values):
-                neg_trends.append({'label': feat, 'values': values})
+            if any(v != 0.0 for v in values): neg_trends.append({'label': feat, 'values': values})
         
-        # Calculate Averages
         all_avgs = {}
         if turns_metrics:
             all_keys = set().union(*turns_metrics)
             for k in all_keys:
                 vals = [t.get(k) for t in turns_metrics if t.get(k) is not None]
-                if vals:
-                    all_avgs[k] = sum(vals) / len(vals)
-        
+                if vals: all_avgs[k] = sum(vals) / len(vals)
         return pos_trends, neg_trends, all_avgs
-
 
 class FeedbackPage(QWidget):
     def __init__(self):
         super().__init__()
-        self.session_logs = [] # Store logs for summary
-        self.report_data = "아직 종합 레포트가 생성되지 않았습니다."  # V1: str, V2: dict
+        self.session_logs = []; self.report_data = "아직 종합 레포트가 생성되지 않았습니다."
+        self.layout = QVBoxLayout(self); self.layout.setContentsMargins(20, 20, 20, 20)
+        title = QLabel("Interview Analysis Report"); title.setProperty("class", "Title"); title.setAlignment(Qt.AlignmentFlag.AlignCenter); self.layout.addWidget(title)
+        self.lbl_waiting = QLabel("데이터를 분석 중입니다..."); self.lbl_waiting.setAlignment(Qt.AlignmentFlag.AlignCenter); self.lbl_waiting.setStyleSheet("color: #4ECDC4; font-size: 18px; font-weight: bold;"); self.layout.addWidget(self.lbl_waiting)
+        self.scroll_area = QScrollArea(); self.scroll_area.setWidgetResizable(True); self.scroll_area.setStyleSheet("background-color: transparent; border: none;"); self.scroll_area.hide()
+        self.container = QWidget(); self.container.setStyleSheet("background-color: transparent;"); self.scroll_layout = QVBoxLayout(self.container); self.scroll_layout.setSpacing(20); self.scroll_layout.setContentsMargins(0, 0, 0, 0); self.scroll_layout.addStretch()
+        self.scroll_area.setWidget(self.container); self.layout.addWidget(self.scroll_area)
         
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(20, 20, 20, 20)
-        
-        title = QLabel("Interview Analysis Report")
-        title.setProperty("class", "Title")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.layout.addWidget(title)
-        
-        self.lbl_waiting = QLabel("데이터를 분석 중입니다...")
-        self.lbl_waiting.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_waiting.setStyleSheet("color: #4ECDC4; font-size: 18px; font-weight: bold;")
-        self.layout.addWidget(self.lbl_waiting)
-        
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("background-color: transparent; border: none;")
-        self.scroll_area.hide()
-        
-        self.container = QWidget()
-        self.container.setStyleSheet("background-color: transparent;")
-        self.scroll_layout = QVBoxLayout(self.container)
-        self.scroll_layout.setSpacing(20)
-        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.scroll_layout.addStretch() 
-        self.scroll_area.setWidget(self.container)
-        self.layout.addWidget(self.scroll_area)
-        
-        # [NEW] 하단 버튼 영역
         bottom_layout = QGridLayout()
-        
-        # 종합 레포트 버튼 (중앙)
-        self.btn_summary = QPushButton("레포트를 생성중입니다...")
-        self.btn_summary.setFixedWidth(250)
-        self.btn_summary.setFixedHeight(50)
-        self.btn_summary.setEnabled(False) # 초기 비활성화
-        self.btn_summary.clicked.connect(self.open_summary_report)
+        self.btn_summary = QPushButton("레포트를 생성중입니다..."); self.btn_summary.setFixedWidth(250); self.btn_summary.setFixedHeight(50); self.btn_summary.setEnabled(False); self.btn_summary.clicked.connect(self.open_summary_report)
         bottom_layout.addWidget(self.btn_summary, 0, 1, Qt.AlignmentFlag.AlignCenter)
-        
-        # 종료 버튼 (우측 하단)
-        btn_close = QPushButton("종료")
-        btn_close.setFixedSize(100, 40)
-        btn_close.setProperty("class", "Secondary")
-        btn_close.clicked.connect(QApplication.instance().quit)
+        btn_close = QPushButton("종료"); btn_close.setFixedSize(100, 40); btn_close.setProperty("class", "Secondary"); btn_close.clicked.connect(QApplication.instance().quit)
         bottom_layout.addWidget(btn_close, 0, 2, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
-        
-        # Grid 비율 조정 (좌, 중, 우)
-        bottom_layout.setColumnStretch(0, 1)
-        bottom_layout.setColumnStretch(1, 2)
-        bottom_layout.setColumnStretch(2, 1)
-        
+        bottom_layout.setColumnStretch(0, 1); bottom_layout.setColumnStretch(1, 2); bottom_layout.setColumnStretch(2, 1)
         self.layout.addLayout(bottom_layout)
 
     def show_feedback(self, data):
-        self.lbl_waiting.hide()
-        self.scroll_area.show()
-        
+        self.lbl_waiting.hide(); self.scroll_area.show()
         while self.scroll_layout.count():
-            item = self.scroll_layout.takeAt(0)
-            w = item.widget()
+            item = self.scroll_layout.takeAt(0); w = item.widget()
             if w: w.deleteLater()
-            
         if isinstance(data, dict) and data.get("type") == "session_log":
-            logs = data.get("items", [])
-            self.session_logs = logs # 저장
-            self.populate_report(logs)
-
+            logs = data.get("items", []); self.session_logs = logs; self.populate_report(logs)
     def enable_summary_report(self, report_data):
-        """report_data: V1 (str) 또는 V2 (dict) 형식 지원"""
-        self.report_data = report_data
-        self.btn_summary.setText("📄 종합 레포트 확인하기")
-        self.btn_summary.setEnabled(True)
-        self.btn_summary.setStyleSheet("background-color: #68D391; color: #1A202C;") # Green highlight
-
-    def open_summary_report(self):
-        dlg = SummaryReportDialog(self.session_logs, self.report_data, self)
-        dlg.exec()
-
+        self.report_data = report_data; self.btn_summary.setText("📄 종합 레포트 확인하기"); self.btn_summary.setEnabled(True); self.btn_summary.setStyleSheet("background-color: #68D391; color: #1A202C;")
+    def open_summary_report(self): dlg = SummaryReportDialog(self.session_logs, self.report_data, self); dlg.exec()
     def populate_report(self, logs):
-        # 기존 위젯 초기화
-        while self.scroll_layout.count():
-            item = self.scroll_layout.takeAt(0)
-            w = item.widget()
-            if w: w.deleteLater()
-            
-        turns = []
-        current_turn = {"ai": [], "user": [], "coach": "", "feedback": None}
-        # [Fix] 현재 턴이 끝나기 전에 미리 도착한 '다음 턴 질문'을 담을 버퍼
+        turns = []; current_turn = {"ai": [], "user": [], "coach": "", "feedback": None}
         next_turn_ai_buffer = []
-        
         for item in logs:
-            itype = item.get("type")
-            idata = item.get("content", "")
+            itype = item.get("type"); idata = item.get("content", "")
             if isinstance(idata, dict): idata = idata.get("message", str(idata))
-            
-            if itype == "ai_text":
-                # [Fix] 사용자가 이미 답변을 했는데 AI가 또 말한다면? -> 다음 턴 질문임 (미리 쟁여두기)
-                if current_turn["user"]:
-                    next_turn_ai_buffer.append(str(idata))
-                else:
-                    # 아직 답변 안 했으면 -> 현재 턴 질문임
-                    current_turn["ai"].append(str(idata))
+            if itype == "ai_text": 
+                if current_turn["user"]: next_turn_ai_buffer.append(str(idata))
+                else: current_turn["ai"].append(str(idata))
             elif itype == "user_text": current_turn["user"].append(str(idata))
             elif itype == "feedback": current_turn["feedback"] = item.get("content")
-            elif itype == "coach_feedback":
-                current_turn["coach"] = str(idata)
-                turns.append(current_turn)
-                # [Fix] 다음 턴 준비: 아까 쟁여둔 AI 질문을 새 턴의 질문으로 설정
-                current_turn = {
-                    "ai": next_turn_ai_buffer, 
-                    "user": [], 
-                    "coach": "", 
-                    "feedback": None
-                }
-                next_turn_ai_buffer = [] # 버퍼 비우기
+            elif itype == "coach_feedback": 
+                current_turn["coach"] = str(idata); turns.append(current_turn)
+                current_turn = {"ai": next_turn_ai_buffer, "user": [], "coach": "", "feedback": None}
+                next_turn_ai_buffer = []
         if current_turn["ai"] or current_turn["user"]: turns.append(current_turn)
-            
-        for i, t in enumerate(turns):
-            turn_widget = TurnWidget(t, i+1)
-            self.scroll_layout.insertWidget(i, turn_widget)
+        for i, t in enumerate(turns): turn_widget = TurnWidget(t, i+1); self.scroll_layout.insertWidget(i, turn_widget)
         self.scroll_layout.addStretch()
-
 
 class OptionsPage(QWidget):
     go_back = pyqtSignal()
@@ -1410,6 +1047,11 @@ class OptionsPage(QWidget):
         h_mode.addWidget(mode_container)
         card_layout.addLayout(h_mode)
 
+        # [NEW] 개발자 모드 (오프라인)
+        self.chk_dev = QCheckBox("GUI 개발자 모드 (서버 연결 안함)")
+        self.chk_dev.setStyleSheet("color: #F6E05E; font-weight: bold;")
+        card_layout.addWidget(self.chk_dev, 0, Qt.AlignmentFlag.AlignCenter)
+
         card_layout.addSpacing(10)
 
         # 3. 마이크 테스트
@@ -1443,6 +1085,8 @@ class OptionsPage(QWidget):
             self.main_window.update_expected_questions(self.spin_questions.value())
             is_default_mode = self.rb_default.isChecked()
             self.main_window.update_feedback_mode(is_default_mode)
+            # [NEW] 개발자 모드 전파
+            self.main_window.dev_mode = self.chk_dev.isChecked()
             
         self.go_back.emit()
 
@@ -1527,7 +1171,7 @@ class MainWindow(QMainWindow):
     sig_user_text = pyqtSignal(str)
     sig_feedback_final = pyqtSignal(dict)
     sig_feedback_realtime = pyqtSignal(str)
-    sig_feedback_summary = pyqtSignal(object)  # V2: dict, V1: str
+    sig_feedback_summary = pyqtSignal(object) 
     sig_transition_to_interview = pyqtSignal()
     sig_transition_to_feedback = pyqtSignal()
     sig_play_audio = pyqtSignal(bytes)
@@ -1543,7 +1187,8 @@ class MainWindow(QMainWindow):
         self.expected_questions = 3
         self.turn_count = 0 
         self.feedback_count = 0 
-        self.feedback_mode = True 
+        self.feedback_mode = True
+        self.dev_mode = False 
         
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -1565,7 +1210,7 @@ class MainWindow(QMainWindow):
         self.sig_ai_text.connect(self.page_interview.update_ai_text)
         self.sig_user_text.connect(self.page_interview.update_user_text)
         self.sig_feedback_final.connect(self.handle_feedback_final_data)
-        self.sig_feedback_summary.connect(self.page_feedback.enable_summary_report) # [NEW]
+        self.sig_feedback_summary.connect(self.page_feedback.enable_summary_report)
         self.sig_transition_to_feedback.connect(self.handle_transition_to_feedback_page)
         self.sig_feedback_realtime.connect(self.page_interview.show_realtime_feedback)
         self.sig_transition_to_interview.connect(self.go_to_interview)
@@ -1596,6 +1241,15 @@ class MainWindow(QMainWindow):
         self.tts_check_timer = QTimer()
         self.tts_check_timer.setInterval(100) 
         self.tts_check_timer.timeout.connect(self.check_tts_finished)
+    
+    # [NEW] 개발자 모드: 스페이스바 누르면 다음 페이지로 이동
+    def keyPressEvent(self, event: QKeyEvent):
+        if self.dev_mode and event.key() == Qt.Key.Key_Space:
+            current_idx = self.stack.currentIndex()
+            next_idx = (current_idx + 1) % self.stack.count()
+            self.stack.setCurrentIndex(next_idx)
+            print(f"[DevMode] Force moved to page {next_idx}")
+        super().keyPressEvent(event)
 
     def update_expected_questions(self, count):
         self.expected_questions = count
@@ -1607,8 +1261,10 @@ class MainWindow(QMainWindow):
         print(f"[Log] Feedback Mode Updated: {'Default' if mode else 'All Analysis'} ({mode})")
 
     def handle_intro_submit(self, json_payload):
-        # IntroPage에서 이미 JSON dump된 문자열을 보냄
-        asyncio.create_task(self.send_queue.put(json_payload))
+        # [수정] 개발자 모드가 아닐 때만 실제 전송
+        if not self.dev_mode:
+            asyncio.create_task(self.send_queue.put(json_payload))
+        
         self.loading_overlay.setGeometry(self.rect())
         self.loading_overlay.show()
         print(f"[Log] Intro Submitted.")
@@ -1656,9 +1312,10 @@ class MainWindow(QMainWindow):
 
             cur_time = time.time()
             if cur_time - self.last_video_send_time > VIDEO_SEND_INTERVAL:
-                _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                b64 = base64.b64encode(buffer).decode('utf-8')
-                asyncio.create_task(self.send_queue.put(json.dumps({"type": "video_frame", "data": b64})))
+                if not self.dev_mode: # [수정] 개발자 모드에선 전송 안함
+                    _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    b64 = base64.b64encode(buffer).decode('utf-8')
+                    asyncio.create_task(self.send_queue.put(json.dumps({"type": "video_frame", "data": b64})))
                 self.last_video_send_time = cur_time
 
     def main_audio_input_callback(self, indata, frames, time, status):
@@ -1666,7 +1323,7 @@ class MainWindow(QMainWindow):
         if self.is_ai_speaking: return
 
         data_bytes = indata.tobytes()
-        if self.main_loop and self.main_loop.is_running():
+        if self.main_loop and self.main_loop.is_running() and not self.dev_mode:
             self.main_loop.call_soon_threadsafe(self.send_queue.put_nowait, data_bytes)
 
     def main_audio_output_callback(self, outdata, frames, time, status):
@@ -1745,6 +1402,13 @@ class MainWindow(QMainWindow):
 
     async def run_client(self):
         self.main_loop = asyncio.get_running_loop()
+        
+        # [NEW] 개발자 모드면 더미 루프로 진입
+        if self.dev_mode:
+            print("[DevMode] Running in Offline Developer Mode.")
+            while True:
+                await asyncio.sleep(1) # Keep Alive
+                
         while True:
             try:
                 print(f"[Log] Connecting to {SERVER_URI}...")
@@ -1791,26 +1455,21 @@ class MainWindow(QMainWindow):
                         self.turn_count += 1
                         print(f"[Log] Turn finished. Count: {self.turn_count} / {self.expected_questions}")
                         
+                        if self.turn_count >= self.expected_questions:
+                            print("[Log] All turns finished. Sending finish flag.")
+                            await self.send_queue.put(json.dumps({"type": "flag", "data": "finish"}))
+                            
+                            agg = {"type": "session_log", "items": self._session_log}
+                            self._session_log = [] 
+                            self.sig_feedback_final.emit(agg)
+                            self.sig_transition_to_feedback.emit()
+                        
                     elif mtype == "feedback":
                         feedback_str = data.get("message", str(data)) if isinstance(data, dict) else str(data)
                         self.sig_feedback_realtime.emit(feedback_str)
-                        
-                    # [New] 서버가 "이제 면접 끝났다"고 신호를 주면 그때 종료
-                    elif mtype == "interview_end":
-                        print("[Log] Server requested interview end. Sending finish flag.")
-                        await self.send_queue.put(json.dumps({"type": "flag", "data": "finish"}))
-                        
-                        # 화면 전환 준비
-                        agg = {"type": "session_log", "items": self._session_log}
-                        self._session_log = [] 
-                        self.sig_feedback_final.emit(agg)
-                        self.sig_transition_to_feedback.emit()
                     
-                    # 최종 리포트 수신 처리 (V2: dict 형식)
                     elif mtype == "final_analysis":
                         print("[Log] Final Report Received!")
-                        # 이 시그널이 FeedbackPage의 버튼을 활성화시킵니다.
-                        # data는 V2에서 dict, V1에서 str
                         self.sig_feedback_summary.emit(data)
 
                 elif isinstance(message, bytes):
@@ -1824,6 +1483,16 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    
+    # [FONTS LOAD] NanumSquareR.ttf
+    font_id_nanum = QFontDatabase.addApplicationFont("NanumSquareR.ttf")
+    if font_id_nanum != -1:
+        FONT_FAMILY_NANUM = QFontDatabase.applicationFontFamilies(font_id_nanum)[0]
+        # Update Global Style Default Font
+        GLOBAL_STYLE = GLOBAL_STYLE.replace("/* font-family는 main에서 동적으로 설정됨 */", f"font-family: '{FONT_FAMILY_NANUM}', 'Segoe UI';")
+    else:
+        print("Failed to load NanumSquare font.")
+
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
     window = MainWindow()
