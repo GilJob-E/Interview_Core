@@ -175,10 +175,15 @@ async def interview_endpoint(websocket: WebSocket):
 
                             # 3. LLM1 (면접관) & TTS
                             current_questions = list(interview_context["questions_queue"])
-                            print(f"[AI] Thinking... (Context Questions: {len(current_questions)})")
+                            current_history = interview_context["history"] # 현재까지 쌓인 기록
+                            print(f"[AI] Thinking... (Context Questions: {len(current_questions)}), (Memory: {len(current_history)} turns)")
                             
                             # LLM에게 (사용자 답변 + 질문 리스트) 전달 -> 자연스러운 대화 유도
-                            llm_stream = ai_engine.generate_llm_response(user_text, current_questions)
+                            llm_stream = ai_engine.generate_llm_response(
+                                user_text, 
+                                current_questions, 
+                                current_history
+                            )
                             
                             buffer = "" 
                             full_ai_text = "" # [New] AI 전체 답변 저장용

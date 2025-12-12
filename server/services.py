@@ -113,15 +113,15 @@ class AIOrchestrator:
             return {"summary": "분석 실패", "questions": ["자기소개를 해주세요."]}
 
     # LLM1: 면접관 (질문 및 대화 진행)
-    def generate_llm_response(self, user_text: str, questions_list: list):
-        # model_id = "llama-3.3-70b-versatile" 
+    def generate_llm_response(self, user_text: str, questions_list: list, history: list = []):
+        # model_id = "llama-3.3-70b-versatile" 안씀
         
         # 질문 리스트를 텍스트로 변환
         q_text = "\n".join([f"- {q}" for q in questions_list])
         
         system_prompt = f"""
         당신은 베테랑 면접관이자 업계의 시니어입니다. 
-        지원자의 답변("{user_text}")에 대해 자연스럽고 예리하게 반응하며 대화를 이어가세요.
+        지원자의 답변("{user_text}")에 대해 이전 대화 맥락을 고려하여 자연스럽고 예리하게 반응하며 대화를 이어가세요.
         
         [지침]
         1. 한글로 답변하세요.
@@ -134,14 +134,24 @@ class AIOrchestrator:
         {q_text}
         """
 
-        # Groq -> OpenAI로 변경
+        # 1. 메시지 리스트 초기화 (시스템 프롬프트)
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # 2. [핵심] 과거 대화 기록 주입 (Memory Injection)
+        # 비용 절약을 위해 최근 3~5턴만 넣을 수도 있음
+        for turn in history[-5:]: # 최근 5턴만 기억 (Token 절약)
+            if turn.get('user_text'):
+                messages.append({"role": "user", "content": turn['user_text']})
+            if turn.get('ai_text'):
+                messages.append({"role": "assistant", "content": turn['ai_text']})
+
+        # 3. 현재 사용자 발화 추가
+        messages.append({"role": "user", "content": user_text})
+
         return self.openai_client.chat.completions.create(
-            model="gpt-4o",  # 모델 변경
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_text},
-            ],
-            temperature=0.7, # 대화의 자연스러움을 위해 약간 높임
+            model="gpt-4o",
+            messages=messages, # 과거 기록이 포함된 메시지 리스트 전송
+            temperature=0.7,
             stream=True 
         )
     # =========================================================================
