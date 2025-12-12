@@ -361,16 +361,21 @@ async def interview_endpoint(websocket: WebSocket):
             # (선택) 클라이언트에게 "분석 중" 알림 보내기
             # await websocket.send_json({"type": "ai_text", "data": "면접 결과를 분석 중입니다. 잠시만 기다려주세요..."})
 
-            # LLM2에게 전체 히스토리 넘기기 (services.py 수정으로 인해 Non-blocking으로 동작함)
-            final_report = await ai_engine.generate_final_report(interview_context["history"])
-        
+            # LLM2에게 전체 히스토리 + 자소서 넘기기 (V2: 상세 피드백 + 역량 분석 포함)
+            final_report = await ai_engine.generate_final_report_v2(
+                interview_context["history"],
+                interview_context.get("intro_text", "")
+            )
+
         print("\n" + "="*60)
-        print("[FINAL REPORT]")
+        print("[FINAL REPORT V2]")
         print("-" * 60)
-        print(final_report) 
+        # V2는 dict 형태이므로 JSON으로 출력
+        import json as json_lib
+        print(json_lib.dumps(final_report, ensure_ascii=False, indent=2)[:2000] + "...")
         print("="*60 + "\n")
 
-        # 클라이언트에게 리포트 전송
+        # 클라이언트에게 리포트 전송 (V2: 구조화된 JSON)
         await websocket.send_json({
             "type": "final_analysis",
             "data": final_report

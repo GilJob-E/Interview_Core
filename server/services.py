@@ -329,6 +329,261 @@ class AIOrchestrator:
             print(f"[Report Error] {e}")
             return "리포트 생성 중 오류가 발생했습니다."
 
+    # =========================================================================
+    # [New V2] Enhanced Final Report with Detailed Feedback & Skills Analysis
+    # =========================================================================
+
+    async def _generate_summary_and_skills(self, interview_history: list, resume_text: str) -> dict:
+        """
+        [Helper] 면접 총평 + 역량 분석 생성 (1 API 호출)
+        - 면접 내용 기반 총평
+        - 자소서 기반 스킬 추출 및 직무 추천
+        """
+        # 히스토리를 텍스트로 변환
+        history_text = ""
+        for turn in interview_history:
+            history_text += f"""
+            [Turn {turn['turn_id']}]
+            질문: {turn['ai_text']}
+            답변: {turn['user_text']}
+            ------------------------------------------------
+            """
+
+        system_prompt = """당신은 베테랑 '면접 전문 코치'입니다.
+전체 면접 데이터와 자기소개서를 분석하여 JSON 형식으로 결과를 반환하세요.
+
+[출력 형식 (JSON)]
+{
+    "summary": "(마크다운) # 면접 종합 리포트\\n\\n## 1. 총평 (100점 만점)\\n...\\n## 2. 강점\\n...\\n## 3. 개선점\\n...\\n## 4. Action Plan\\n...",
+    "skills": {
+        "soft_skills": [
+            {"skill": "스킬명", "evidence": "자소서에서 해당 스킬을 추출한 근거 (1문장)"},
+            ...
+        ],
+        "hard_skills": [
+            {"skill": "스킬명", "evidence": "자소서에서 해당 스킬을 추출한 근거 (1문장)"},
+            ...
+        ],
+        "recommended_jobs": [
+            {"title": "직무명1", "match_reason": "매칭 이유"},
+            {"title": "직무명2", "match_reason": "매칭 이유"},
+            {"title": "직무명3", "match_reason": "매칭 이유"}
+        ],
+        "extraction_criteria": "스킬 추출 기준에 대한 간략한 설명 (1-2문장)"
+    }
+}
+
+[작성 지침]
+1. summary: 면접 내용을 기반으로 총평, 강점, 개선점, Action Plan을 마크다운으로 작성
+2. soft_skills: 자기소개서에서 추출한 소프트 스킬 (최대 5개) - 예: 커뮤니케이션, 리더십, 문제해결력
+   - 각 스킬에 대해 자소서의 어떤 내용에서 추출했는지 evidence를 반드시 포함
+3. hard_skills: 자기소개서에서 추출한 하드 스킬 (최대 5개) - 예: Python, 데이터분석, SQL
+   - 각 스킬에 대해 자소서의 어떤 내용에서 추출했는지 evidence를 반드시 포함
+4. recommended_jobs: 추출된 역량에 기반한 추천 직무 3개와 매칭 이유
+5. extraction_criteria: 전체 스킬 추출에 사용한 기준 설명
+"""
+
+        user_prompt = f"""[자기소개서]
+{resume_text if resume_text else "자기소개서 없음"}
+
+[면접 기록]
+{history_text}"""
+
+        try:
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.openai_client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.6,
+                    max_tokens=3500,
+                    response_format={"type": "json_object"}
+                )
+            )
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"[Summary & Skills Error] {e}")
+            return {
+                "summary": "리포트 생성 중 오류가 발생했습니다.",
+                "skills": {
+                    "soft_skills": [],
+                    "hard_skills": [],
+                    "recommended_jobs": []
+                }
+            }
+
+    async def _generate_turn_feedback(self, turn_idx: int, turn: dict, user_turns: list) -> dict:
+        """
+        [Helper] 개별 턴에 대한 상세 피드백 생성
+        - 질문 의도 분석
+        - 답변 분석 (강점/약점)
+        - 예시 답안 제공
+
+        Args:
+            turn_idx: 0-based index in user_turns list
+            turn: current turn data
+            user_turns: filtered list of user turns (excluding closing statements)
+        """
+        # 올바른 질문 찾기: 초기 질문은 history에 저장되지 않으므로 수동 매칭 필요
+        if turn_idx == 0:
+            # 첫 번째 답변 → 초기 질문 (하드코딩)
+            actual_question = "만나서 반갑습니다. 먼저 간단하게 자기소개를 해주세요"
+        else:
+            # N번째 답변 → (N-1)번째 턴의 ai_text (꼬리질문)
+            prev_turn = user_turns[turn_idx - 1]
+            actual_question = prev_turn.get('ai_text', '')
+
+        # 전체 맥락 요약 (이전 대화) - 올바른 질문 사용
+        context_text = ""
+        for i, t in enumerate(user_turns):
+            if i < turn_idx:
+                if i == 0:
+                    q = "만나서 반갑습니다. 먼저 간단하게 자기소개를 해주세요"
+                else:
+                    q = user_turns[i - 1].get('ai_text', '')
+                context_text += f"Q: {q}\nA: {t['user_text']}\n---\n"
+
+        system_prompt = """당신은 면접 코칭 전문가입니다.
+주어진 면접 질문과 답변에 대해 상세한 피드백을 JSON 형식으로 제공하세요.
+
+[출력 형식 (JSON)]
+{
+    "question_intent": "면접관이 이 질문을 통해 알고자 하는 것 (2-3문장)",
+    "answer_analysis": "지원자 답변의 강점과 약점 분석 (3-4문장)",
+    "example_answer": "개선된 예시 답안 (실제 답변처럼 자연스럽게, 5-7문장)"
+}
+
+[작성 지침]
+1. question_intent: 면접관 관점에서 질문의 숨은 의도 분석
+2. answer_analysis: 구체적인 강점과 개선점 언급 (두루뭉술하지 않게)
+3. example_answer: STAR 기법 또는 두괄식 구조로 모범 답안 제시
+"""
+
+        user_prompt = f"""[이전 대화 맥락]
+{context_text if context_text else "첫 번째 질문입니다."}
+
+[현재 질문]
+{actual_question}
+
+[지원자 답변]
+{turn['user_text']}"""
+
+        try:
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.openai_client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.6,
+                    max_tokens=800,
+                    response_format={"type": "json_object"}
+                )
+            )
+            result = json.loads(response.choices[0].message.content)
+            return {
+                "turn_number": turn_idx + 1,  # 1-based for display
+                "question": actual_question,
+                "user_answer": turn['user_text'],
+                "question_intent": result.get("question_intent", ""),
+                "answer_analysis": result.get("answer_analysis", ""),
+                "example_answer": result.get("example_answer", "")
+            }
+        except Exception as e:
+            print(f"[Turn Feedback Error] Turn {turn_idx + 1}: {e}")
+            return {
+                "turn_number": turn_idx + 1,  # 1-based for display
+                "question": actual_question,
+                "user_answer": turn['user_text'],
+                "question_intent": "분석 실패",
+                "answer_analysis": "분석 실패",
+                "example_answer": "예시 답안 생성 실패"
+            }
+
+    async def generate_final_report_v2(self, interview_history: list, resume_text: str = "") -> dict:
+        """
+        [LLM2 V2] 면접 종료 후 향상된 종합 리포트 생성
+        - 입력: 전체 대화 기록 및 자기소개서
+        - 출력: 구조화된 JSON (총평, 상세 피드백, 역량 분석)
+        """
+        if not interview_history:
+            return {
+                "llm_summary": "대화 히스토리 없음",
+                "detailed_feedback": [],
+                "skills_analysis": {
+                    "soft_skills": [],
+                    "hard_skills": [],
+                    "recommended_jobs": []
+                }
+            }
+
+        try:
+            # Step 1: 총평 + 역량 분석 생성 (1 API 호출)
+            print("[Report V2] Generating summary and skills analysis...")
+            summary_and_skills = await self._generate_summary_and_skills(
+                interview_history, resume_text
+            )
+
+            # Step 2: 턴별 상세 피드백 생성 (병렬 API 호출)
+            print("[Report V2] Generating per-turn detailed feedback...")
+            detailed_feedback = []
+
+            # 종료 멘트 필터링을 위한 키워드
+            CLOSING_PHRASES = ["면접을 마치겠습니다", "수고하셨습니다", "답변 잘 들었습니다", "면접이 종료"]
+
+            def is_closing_turn(turn):
+                """면접 종료 멘트인지 확인"""
+                ai_text = turn.get('ai_text', '')
+                return any(phrase in ai_text for phrase in CLOSING_PHRASES)
+
+            # 사용자 답변이 있는 모든 턴 포함 (종료 멘트 필터링 제거)
+            # ai_text가 종료멘트여도 user_text(답변)는 유효하므로 피드백 생성 필요
+            user_turns = [
+                t for t in interview_history
+                if t.get('user_text')
+            ]
+
+            # 병렬 처리를 위한 태스크 생성 (idx 전달로 올바른 질문 매칭)
+            tasks = [
+                self._generate_turn_feedback(idx, turn, user_turns)
+                for idx, turn in enumerate(user_turns)
+            ]
+
+            # 병렬 실행
+            if tasks:
+                detailed_feedback = await asyncio.gather(*tasks)
+
+            print(f"[Report V2] Generated feedback for {len(detailed_feedback)} turns.")
+
+            return {
+                "llm_summary": summary_and_skills.get("summary", ""),
+                "detailed_feedback": list(detailed_feedback),
+                "skills_analysis": summary_and_skills.get("skills", {
+                    "soft_skills": [],
+                    "hard_skills": [],
+                    "recommended_jobs": []
+                })
+            }
+
+        except Exception as e:
+            print(f"[Report V2 Error] {e}")
+            return {
+                "llm_summary": "리포트 생성 중 오류가 발생했습니다.",
+                "detailed_feedback": [],
+                "skills_analysis": {
+                    "soft_skills": [],
+                    "hard_skills": [],
+                    "recommended_jobs": []
+                }
+            }
+
     def text_to_speech_stream(self, text: str):
         if not text or not isinstance(text, str) or len(text.strip()) == 0:
             return []
