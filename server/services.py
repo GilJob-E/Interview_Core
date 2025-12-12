@@ -217,9 +217,9 @@ class AIOrchestrator:
             system_prompt = f"""
             한글로 답변하세요.
             당신은 데이터 기반의 'AI 면접 코치'입니다. 
-            지원자의 답변("{user_text}")과 [멀티모달 데이터]를 분석하여, 즉시 교정해야 할 점을 1~2문장으로 조언하세요.
+            지원자의 답변("{user_text}")과 [멀티모달 데이터]를 분석하여, 즉시 교정해야 할 3가지 이하의 요소를 1~2문장으로 조언하세요.
 
-            [데이터 해석 가이드 (중요)]
+            [데이터 해석 가이드 (참고)]
             제공되는 수치는 Z-Score(표준점수)를 포함합니다. Z-Score가 제시된 기준 범위에 포함되면 '평균과 다름'을 의미하므로 주의 깊게 보십시오.
             
             1. 오디오 (Audio)
@@ -234,9 +234,9 @@ class AIOrchestrator:
 
             3. 텍스트 (Text)
             - WPSEC (말하기 속도): Z > 0.69 (빠름/긴장), Z < -4.95 (느림/자신감 부족) 상관계수 : (0.1, 0.13)
-            - UPSEC (어휘 다양성): Z < -100 → 단조로운 표현 반복 (감점) 상관계수 : (0.08, 0.1)
-            - Fillers ("음, 어, 그" 빈도): Z > -0.41 → 추임새 많음 (감점) 상관계수 : (-0.08, -0.12)
-            - Quantifiers (수치 언급): Z < -4.46 (구체성 부족), Z > 2.06 (숫자만 나열) 상관계수 : (0.09, 0.08)
+            - UPSEC (어휘 다양성): 사용자 응답의 길이에 비해 독립된 단어의 수가 매우 부족한 경우 지적하시오. 상관계수 : (0.08, 0.1)
+            - Fillers ("음, 어, 그" 빈도): 사용자 응답에서 "음, 어, 그"와 같은 불필요한 추임새가 많다면 지적하시오. 상관계수 : (-0.08, -0.12)
+            - Quantifiers (수치 언급): 답변 맥락에서 구체적인 수치언급이 있으면 좋을 거 같을 때만 지적하시오. 상관계수 : (-0.08, -0.12)
 
             [작성 규칙]
             - 한글로 답변하세요.
@@ -265,7 +265,6 @@ class AIOrchestrator:
             
             3. Text
             - WPSEC: {wpsec.get('value', 0)} wps (Z: {wpsec.get('z_score', 0)})
-            - UPSEC: {upsec.get('value', 0)} ups (Z: {upsec.get('z_score', 0)})
             - Fillers: {fillers.get('value', 0)} count/sec (Z: {fillers.get('z_score', 0)})
             - Quantifiers: {quantifier.get('value', 0)} ratio (Z: {quantifier.get('z_score', 0)})
             """
@@ -281,7 +280,7 @@ class AIOrchestrator:
                         {"role": "user", "content": user_prompt},
                     ],
                     temperature=0.6,
-                    max_tokens=100
+                    max_tokens=150
                 )
             )
             
@@ -378,44 +377,44 @@ class AIOrchestrator:
             """
 
         system_prompt = """당신은 베테랑 '면접 전문 코치'입니다.
-전체 면접 데이터와 자기소개서를 분석하여 JSON 형식으로 결과를 반환하세요.
+        전체 면접 데이터와 자기소개서를 분석하여 JSON 형식으로 결과를 반환하세요.
 
-[출력 형식 (JSON)]
-{
-    "summary": "(마크다운) # 면접 종합 리포트\\n\\n## 1. 총평 (100점 만점)\\n...\\n## 2. 강점\\n...\\n## 3. 개선점\\n...\\n## 4. Action Plan\\n...",
-    "skills": {
-        "soft_skills": [
-            {"skill": "스킬명", "evidence": "자소서에서 해당 스킬을 추출한 근거 (1문장)"},
-            ...
-        ],
-        "hard_skills": [
-            {"skill": "스킬명", "evidence": "자소서에서 해당 스킬을 추출한 근거 (1문장)"},
-            ...
-        ],
-        "recommended_jobs": [
-            {"title": "직무명1", "match_reason": "매칭 이유"},
-            {"title": "직무명2", "match_reason": "매칭 이유"},
-            {"title": "직무명3", "match_reason": "매칭 이유"}
-        ],
-        "extraction_criteria": "스킬 추출 기준에 대한 간략한 설명 (1-2문장)"
-    }
-}
+        [출력 형식 (JSON)]
+        {
+            "summary": "(마크다운) # 면접 종합 리포트\\n\\n## 1. 총평 (100점 만점)\\n...\\n## 2. 강점\\n...\\n## 3. 개선점\\n...\\n## 4. Action Plan\\n...",
+            "skills": {
+                "soft_skills": [
+                    {"skill": "스킬명", "evidence": "자소서에서 해당 스킬을 추출한 근거 (1문장)"},
+                    ...
+                ],
+                "hard_skills": [
+                    {"skill": "스킬명", "evidence": "자소서에서 해당 스킬을 추출한 근거 (1문장)"},
+                    ...
+                ],
+                "recommended_jobs": [
+                    {"title": "직무명1", "match_reason": "매칭 이유"},
+                    {"title": "직무명2", "match_reason": "매칭 이유"},
+                    {"title": "직무명3", "match_reason": "매칭 이유"}
+                ],
+                "extraction_criteria": "스킬 추출 기준에 대한 간략한 설명 (1-2문장)"
+            }
+        }
 
-[작성 지침]
-1. summary: 면접 내용을 기반으로 총평, 강점, 개선점, Action Plan을 마크다운으로 작성
-2. soft_skills: 자기소개서에서 추출한 소프트 스킬 (최대 5개) - 예: 커뮤니케이션, 리더십, 문제해결력
-   - 각 스킬에 대해 자소서의 어떤 내용에서 추출했는지 evidence를 반드시 포함
-3. hard_skills: 자기소개서에서 추출한 하드 스킬 (최대 5개) - 예: Python, 데이터분석, SQL
-   - 각 스킬에 대해 자소서의 어떤 내용에서 추출했는지 evidence를 반드시 포함
-4. recommended_jobs: 추출된 역량에 기반한 추천 직무 3개와 매칭 이유
-5. extraction_criteria: 전체 스킬 추출에 사용한 기준 설명
-"""
+        [작성 지침]
+        1. summary: 면접 내용을 기반으로 총평, 강점, 개선점, Action Plan을 마크다운으로 작성
+        2. soft_skills: 자기소개서에서 추출한 소프트 스킬 (최대 5개) - 예: 커뮤니케이션, 리더십, 문제해결력
+        - 각 스킬에 대해 자소서의 어떤 내용에서 추출했는지 evidence를 반드시 포함
+        3. hard_skills: 자기소개서에서 추출한 하드 스킬 (최대 5개) - 예: Python, 데이터분석, SQL
+        - 각 스킬에 대해 자소서의 어떤 내용에서 추출했는지 evidence를 반드시 포함
+        4. recommended_jobs: 추출된 역량에 기반한 추천 직무 3개와 매칭 이유
+        5. extraction_criteria: 전체 스킬 추출에 사용한 기준 설명
+        """
 
         user_prompt = f"""[자기소개서]
-{resume_text if resume_text else "자기소개서 없음"}
+        {resume_text if resume_text else "자기소개서 없음"}
 
-[면접 기록]
-{history_text}"""
+        [면접 기록]
+        {history_text}"""
 
         try:
             loop = asyncio.get_running_loop()
@@ -476,29 +475,29 @@ class AIOrchestrator:
                 context_text += f"Q: {q}\nA: {t['user_text']}\n---\n"
 
         system_prompt = """당신은 면접 코칭 전문가입니다.
-주어진 면접 질문과 답변에 대해 상세한 피드백을 JSON 형식으로 제공하세요.
+        주어진 면접 질문과 답변에 대해 상세한 피드백을 JSON 형식으로 제공하세요.
 
-[출력 형식 (JSON)]
-{
-    "question_intent": "면접관이 이 질문을 통해 알고자 하는 것 (2-3문장)",
-    "answer_analysis": "지원자 답변의 강점과 약점 분석 (3-4문장)",
-    "example_answer": "개선된 예시 답안 (실제 답변처럼 자연스럽게, 5-7문장)"
-}
+        [출력 형식 (JSON)]
+        {
+            "question_intent": "면접관이 이 질문을 통해 알고자 하는 것 (2-3문장)",
+            "answer_analysis": "지원자 답변의 강점과 약점 분석 (3-4문장)",
+            "example_answer": "개선된 예시 답안 (실제 답변처럼 자연스럽게, 5-7문장)"
+        }
 
-[작성 지침]
-1. question_intent: 면접관 관점에서 질문의 숨은 의도 분석
-2. answer_analysis: 구체적인 강점과 개선점 언급 (두루뭉술하지 않게)
-3. example_answer: STAR 기법 또는 두괄식 구조로 모범 답안 제시
-"""
+        [작성 지침]
+        1. question_intent: 면접관 관점에서 질문의 숨은 의도 분석
+        2. answer_analysis: 구체적인 강점과 개선점 언급 (두루뭉술하지 않게)
+        3. example_answer: STAR 기법 또는 두괄식 구조로 모범 답안 제시
+        """
 
         user_prompt = f"""[이전 대화 맥락]
-{context_text if context_text else "첫 번째 질문입니다."}
+        {context_text if context_text else "첫 번째 질문입니다."}
 
-[현재 질문]
-{actual_question}
+        [현재 질문]
+        {actual_question}
 
-[지원자 답변]
-{turn['user_text']}"""
+        [지원자 답변]
+        {turn['user_text']}"""
 
         try:
             loop = asyncio.get_running_loop()
