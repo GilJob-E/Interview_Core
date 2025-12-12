@@ -18,7 +18,7 @@ class AIOrchestrator:
         # 1. STT
         print("[STT] Using Groq Whisper API.")
 
-        # 2. LLM & STT Client
+       # 2. LLM & STT Client
         self.groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         print("[LLM/STT] Groq Client Connected.")
 

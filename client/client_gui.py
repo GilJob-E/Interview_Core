@@ -529,7 +529,6 @@ class InterviewOverlay(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-<<<<<<< HEAD
         self.top_bar_height = 100
         self.bottom_bar_height = 120
         
@@ -551,7 +550,6 @@ class InterviewOverlay(QWidget):
         self.lbl_ai_text.setWordWrap(True)
         self.lbl_ai_text.setFixedHeight(self.top_bar_height - 20) 
         self.lbl_ai_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-=======
         # 새 턴 감지용 플래그 (True면 텍스트 교체, False면 이어붙이기)
         self.expecting_new_ai_turn = True 
         
@@ -572,12 +570,10 @@ class InterviewOverlay(QWidget):
         self.lbl_ai_text.setWordWrap(True)
         self.lbl_ai_text.setMinimumHeight(80)
         self.lbl_ai_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
->>>>>>> c656076bbd95563a3f6bcfc4b88bd80b26d83dac
         self.lbl_ai_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         
         layout.addWidget(self.lbl_ai_text, 0, 0, 1, 12)
         layout.setRowStretch(1, 1)
-<<<<<<< HEAD
 
         # 2. 피드백 위젯
         self.feedback_widget = FeedbackDisplayWidget(self)
@@ -636,29 +632,27 @@ class InterviewOverlay(QWidget):
     def update_webcam(self, pixmap): self.webcam_widget.update_frame(pixmap)
     def show_realtime_feedback(self, text): self.feedback_widget.add_feedback(text)
     def set_webcam_border(self, color): self.webcam_widget.set_border_color(color)
-=======
         
-        self.feedback_widget = FeedbackDisplayWidget(self)
-        self.feedback_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        layout.addWidget(self.feedback_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
-        
-        self.webcam_widget = WebcamFeedbackWidget(self)
-        self.webcam_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        layout.addWidget(self.webcam_widget, 2, 8, 2, 4, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
-        
-        self.lbl_user_text = QLabel("")
-        self.lbl_user_text.setStyleSheet("""
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 10px 20px;
-            border-radius: 15px;
-            font-size: 16px;
-        """)
-        self.lbl_user_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_user_text.hide()
-        self.lbl_user_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        layout.addWidget(self.lbl_user_text, 4, 1, 1, 10)
->>>>>>> c656076bbd95563a3f6bcfc4b88bd80b26d83dac
+    self.feedback_widget = FeedbackDisplayWidget(self)
+    self.feedback_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+    layout.addWidget(self.feedback_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+    
+    self.webcam_widget = WebcamFeedbackWidget(self)
+    self.webcam_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    layout.addWidget(self.webcam_widget, 2, 8, 2, 4, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+    
+    self.lbl_user_text = QLabel("")
+    self.lbl_user_text.setStyleSheet("""
+        background-color: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 15px;
+        font-size: 16px;
+    """)
+    self.lbl_user_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    self.lbl_user_text.hide()
+    self.lbl_user_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+    layout.addWidget(self.lbl_user_text, 4, 1, 1, 10)
 
     def set_feedback_mode(self, is_default):
         self.feedback_widget.set_mode(is_default)
