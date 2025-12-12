@@ -1,6 +1,10 @@
 import numpy as np
 import sounddevice as sd
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QLabel, QSpinBox, QProgressBar, QPushButton, QRadioButton, QButtonGroup, QCheckBox
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QFrame, QHBoxLayout, QLabel, 
+    QSpinBox, QProgressBar, QPushButton, QRadioButton, 
+    QButtonGroup, QCheckBox, QSizePolicy
+)
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 import settings
 

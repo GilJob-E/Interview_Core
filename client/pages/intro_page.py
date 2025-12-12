@@ -1,5 +1,8 @@
 import json
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFrame, QHBoxLayout, QLabel, QPushButton, QTextEdit, QFileDialog
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QFrame, QHBoxLayout, QLabel, 
+    QPushButton, QTextEdit, QFileDialog, QSizePolicy
+)
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 import settings
 

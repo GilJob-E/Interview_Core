@@ -6,9 +6,11 @@ import queue
 import time
 import numpy as np
 import sounddevice as sd
+import websockets
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QImage, QKeyEvent
+
 
 import settings
 from pages.intro_page import IntroPage

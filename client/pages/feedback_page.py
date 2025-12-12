@@ -1,12 +1,16 @@
 import json
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QGridLayout, QPushButton, QDialog, QTabWidget, QHBoxLayout, QTextEdit
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QScrollArea, QGridLayout, 
+    QPushButton, QDialog, QTabWidget, QHBoxLayout, QTextEdit,
+    QFrame, QSizePolicy, QApplication
+)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QBrush
-from widgets.feedback_items import TurnWidget
+# [수정] 모든 관련 위젯을 여기서 import
+from widgets.feedback_items import TurnWidget, DetailedFeedbackTab, SkillsAnalysisTab
 from widgets.charts import SimpleLineChartWidget, AverageZScoreChartWidget
 import settings
 
-# SummaryReportDialog 등은 파일 내부에 포함 (import 순환 방지)
 class SummaryReportDialog(QDialog):
     def __init__(self, logs, report_data, parent=None):
         super().__init__(parent)
@@ -61,14 +65,11 @@ class SummaryReportDialog(QDialog):
         
         # 3. Detailed Feedback Tab
         if detailed_feedback:
-            # 순환 참조 방지를 위해 로컬 import
-            from widgets.feedback_items import DetailedFeedbackTab
             feedback_tab = DetailedFeedbackTab(detailed_feedback)
             tabs.addTab(feedback_tab, "질문별 피드백")
 
         # 4. Skills Analysis Tab
         if skills_analysis:
-            from widgets.feedback_items import SkillsAnalysisTab
             skills_tab = SkillsAnalysisTab(skills_analysis)
             tabs.addTab(skills_tab, "역량 분석")
         
@@ -76,7 +77,6 @@ class SummaryReportDialog(QDialog):
         layout.addWidget(btn_ok, 0, Qt.AlignmentFlag.AlignCenter)
 
     def process_data(self, logs):
-        # (기존 데이터 처리 로직 동일)
         turns_metrics = []
         for item in logs:
             if item.get("type") == "feedback":
