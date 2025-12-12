@@ -289,6 +289,7 @@ class TurnWidget(QFrame):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
         
+        # 구분선
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
@@ -296,25 +297,45 @@ class TurnWidget(QFrame):
         line.setFixedHeight(1)
         layout.addWidget(line)
 
+        # 1. AI 질문 영역 (항상 표시)
         ai_text = "<br>".join(turn_data["ai"])
         lbl_ai = QLabel(f"Q{index}. {ai_text}")
         lbl_ai.setProperty("class", "SectionAI")
         lbl_ai.setWordWrap(True)
         layout.addWidget(lbl_ai)
         
-        user_text = "<br>".join(turn_data["user"])
-        if not user_text: user_text = "(답변 없음)"
-        lbl_user = QLabel(user_text)
-        lbl_user.setProperty("class", "SectionUser")
-        lbl_user.setWordWrap(True)
-        layout.addWidget(lbl_user)
+        # 데이터 존재 여부 확인
+        user_lines = turn_data.get("user", [])
+        coach_msg = turn_data.get("coach", "")
         
-        coach_text = turn_data.get("coach", "-")
-        lbl_coach = QLabel(f"💡 Coach: {coach_text}")
-        lbl_coach.setProperty("class", "SectionCoach")
-        lbl_coach.setWordWrap(True)
-        layout.addWidget(lbl_coach)
+        has_user_response = len(user_lines) > 0
+        has_coach_feedback = bool(coach_msg)
+
+        # 2. 사용자 답변 영역 처리
+        # - 답변이 있으면: 표시
+        # - 답변이 없고 코치 피드백이 있으면: "(답변 없음)" 표시 (침묵한 경우)
+        # - 둘 다 없으면: 표시 안 함 (마무리 멘트인 경우) ★
+        if has_user_response:
+            user_text = "<br>".join(user_lines)
+            lbl_user = QLabel(user_text)
+            lbl_user.setProperty("class", "SectionUser")
+            lbl_user.setWordWrap(True)
+            layout.addWidget(lbl_user)
+        elif has_coach_feedback:
+            lbl_user = QLabel("(답변 없음)")
+            lbl_user.setProperty("class", "SectionUser")
+            lbl_user.setStyleSheet("color: #718096; font-style: italic;")
+            layout.addWidget(lbl_user)
         
+        # 3. 코치 피드백 영역 처리
+        # - 피드백이 있을 때만 표시 ★
+        if has_coach_feedback:
+            lbl_coach = QLabel(f"💡 Coach: {coach_msg}")
+            lbl_coach.setProperty("class", "SectionCoach")
+            lbl_coach.setWordWrap(True)
+            layout.addWidget(lbl_coach)
+        
+        # 4. 상세 분석 버튼 처리
         self.feedback_data = turn_data.get("feedback")
         if isinstance(self.feedback_data, str):
             try:
@@ -487,7 +508,20 @@ class IntroPage(QWidget):
             except Exception as e: self.text_edit.setText(f"[오류] {e}")
     def on_submit(self):
         text = self.text_edit.toPlainText()
-        if text.strip(): self.submitted.emit(text)
+        if text.strip():
+            # [Fix] 설정값(질문 개수)을 메인 윈도우에서 가져옴
+            main_window = self.window() # 부모 위젯 탐색
+            q_count = 3
+            if main_window:
+                q_count = main_window.expected_questions
+
+            # 자소서와 함께 설정값 전송
+            payload = {
+                "type": "text",
+                "data": text,
+                "config": {"question_count": q_count} # [New] 설정값 추가
+            }
+            self.submitted.emit(json.dumps(payload)) # JSON 문자열로 방출
     def on_options(self): self.go_to_options.emit()
 
 class InterviewOverlay(QWidget):
@@ -495,6 +529,7 @@ class InterviewOverlay(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
+<<<<<<< HEAD
         self.top_bar_height = 100
         self.bottom_bar_height = 120
         
@@ -516,10 +551,33 @@ class InterviewOverlay(QWidget):
         self.lbl_ai_text.setWordWrap(True)
         self.lbl_ai_text.setFixedHeight(self.top_bar_height - 20) 
         self.lbl_ai_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+=======
+        # 새 턴 감지용 플래그 (True면 텍스트 교체, False면 이어붙이기)
+        self.expecting_new_ai_turn = True 
+        
+        layout = QGridLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        self.lbl_ai_text = QLabel("AI 면접관 연결 중...")
+        self.lbl_ai_text.setStyleSheet("""
+            background-color: rgba(255, 255, 255, 0.95);
+            color: #1A202C;
+            padding: 20px;
+            border-radius: 20px;
+            border-bottom-left-radius: 0px;
+            font-size: 18px;
+            font-weight: 600;
+        """)
+        self.lbl_ai_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.lbl_ai_text.setWordWrap(True)
+        self.lbl_ai_text.setMinimumHeight(80)
+        self.lbl_ai_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+>>>>>>> c656076bbd95563a3f6bcfc4b88bd80b26d83dac
         self.lbl_ai_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         
         layout.addWidget(self.lbl_ai_text, 0, 0, 1, 12)
         layout.setRowStretch(1, 1)
+<<<<<<< HEAD
 
         # 2. 피드백 위젯
         self.feedback_widget = FeedbackDisplayWidget(self)
@@ -578,7 +636,64 @@ class InterviewOverlay(QWidget):
     def update_webcam(self, pixmap): self.webcam_widget.update_frame(pixmap)
     def show_realtime_feedback(self, text): self.feedback_widget.add_feedback(text)
     def set_webcam_border(self, color): self.webcam_widget.set_border_color(color)
+=======
+        
+        self.feedback_widget = FeedbackDisplayWidget(self)
+        self.feedback_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        layout.addWidget(self.feedback_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+        
+        self.webcam_widget = WebcamFeedbackWidget(self)
+        self.webcam_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.webcam_widget, 2, 8, 2, 4, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        
+        self.lbl_user_text = QLabel("")
+        self.lbl_user_text.setStyleSheet("""
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 15px;
+            font-size: 16px;
+        """)
+        self.lbl_user_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_user_text.hide()
+        self.lbl_user_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.lbl_user_text, 4, 1, 1, 10)
+>>>>>>> c656076bbd95563a3f6bcfc4b88bd80b26d83dac
 
+    def set_feedback_mode(self, is_default):
+        self.feedback_widget.set_mode(is_default)
+
+    def update_ai_text(self, text):
+        # [핵심 로직]
+        # 새 턴이거나 초기 상태라면 -> 텍스트 교체 (덮어쓰기)
+        if self.expecting_new_ai_turn:
+            self.lbl_ai_text.setText(text)
+            self.expecting_new_ai_turn = False # 이제부터는 이어붙이기 모드
+        else:
+            # 같은 턴 내의 문장이라면 -> 이어 붙이기
+            current = self.lbl_ai_text.text()
+            # 중복 전송 방지 및 띄어쓰기 추가
+            if not current.endswith(text): 
+                self.lbl_ai_text.setText(current + " " + text)
+
+    def update_user_text(self, text):
+        if text:
+            self.lbl_user_text.setText(f"{text}")
+            self.lbl_user_text.show()
+            QTimer.singleShot(3000, self.lbl_user_text.hide)
+            
+            # [핵심 로직] 사용자가 말을 했으니, 다음 AI 멘트는 '새로운 질문'임
+            self.expecting_new_ai_turn = True
+
+    def update_webcam(self, pixmap):
+        self.webcam_widget.update_frame(pixmap)
+
+    def show_realtime_feedback(self, text):
+        self.feedback_widget.add_feedback(text)
+
+    def set_webcam_border(self, color):
+        self.webcam_widget.set_border_color(color)
+        
 class InterviewPage(QWidget):
     def __init__(self):
         super().__init__()
@@ -976,21 +1091,42 @@ class FeedbackPage(QWidget):
         dlg.exec()
 
     def populate_report(self, logs):
-        # [기존 로직 유지] TurnWidget 생성
+        # 기존 위젯 초기화
+        while self.scroll_layout.count():
+            item = self.scroll_layout.takeAt(0)
+            w = item.widget()
+            if w: w.deleteLater()
+            
         turns = []
         current_turn = {"ai": [], "user": [], "coach": "", "feedback": None}
+        # [Fix] 현재 턴이 끝나기 전에 미리 도착한 '다음 턴 질문'을 담을 버퍼
+        next_turn_ai_buffer = []
+        
         for item in logs:
             itype = item.get("type")
             idata = item.get("content", "")
             if isinstance(idata, dict): idata = idata.get("message", str(idata))
             
-            if itype == "ai_text": current_turn["ai"].append(str(idata))
+            if itype == "ai_text":
+                # [Fix] 사용자가 이미 답변을 했는데 AI가 또 말한다면? -> 다음 턴 질문임 (미리 쟁여두기)
+                if current_turn["user"]:
+                    next_turn_ai_buffer.append(str(idata))
+                else:
+                    # 아직 답변 안 했으면 -> 현재 턴 질문임
+                    current_turn["ai"].append(str(idata))
             elif itype == "user_text": current_turn["user"].append(str(idata))
             elif itype == "feedback": current_turn["feedback"] = item.get("content")
             elif itype == "coach_feedback":
                 current_turn["coach"] = str(idata)
                 turns.append(current_turn)
-                current_turn = {"ai": [], "user": [], "coach": "", "feedback": None}
+                # [Fix] 다음 턴 준비: 아까 쟁여둔 AI 질문을 새 턴의 질문으로 설정
+                current_turn = {
+                    "ai": next_turn_ai_buffer, 
+                    "user": [], 
+                    "coach": "", 
+                    "feedback": None
+                }
+                next_turn_ai_buffer = [] # 버퍼 비우기
         if current_turn["ai"] or current_turn["user"]: turns.append(current_turn)
             
         for i, t in enumerate(turns):
@@ -1262,11 +1398,12 @@ class MainWindow(QMainWindow):
         self.page_interview.set_feedback_mode(mode)
         print(f"[Log] Feedback Mode Updated: {'Default' if mode else 'All Analysis'} ({mode})")
 
-    def handle_intro_submit(self, text):
-        asyncio.create_task(self.send_queue.put(json.dumps({"type": "text", "data": text})))
+    def handle_intro_submit(self, json_payload):
+        # IntroPage에서 이미 JSON dump된 문자열을 보냄
+        asyncio.create_task(self.send_queue.put(json_payload))
         self.loading_overlay.setGeometry(self.rect())
         self.loading_overlay.show()
-        print(f"[Log] Intro Submitted. Length: {len(text)}")
+        print(f"[Log] Intro Submitted.")
         QTimer.singleShot(2000, self._on_intro_done)
 
     def _on_intro_done(self):
@@ -1446,20 +1583,22 @@ class MainWindow(QMainWindow):
                         self.turn_count += 1
                         print(f"[Log] Turn finished. Count: {self.turn_count} / {self.expected_questions}")
                         
-                        if self.turn_count >= self.expected_questions:
-                            print("[Log] All turns finished. Sending finish flag.")
-                            await self.send_queue.put(json.dumps({"type": "flag", "data": "finish"}))
-                            
-                            agg = {"type": "session_log", "items": self._session_log}
-                            self._session_log = [] 
-                            self.sig_feedback_final.emit(agg)
-                            self.sig_transition_to_feedback.emit()
-                        
                     elif mtype == "feedback":
                         feedback_str = data.get("message", str(data)) if isinstance(data, dict) else str(data)
                         self.sig_feedback_realtime.emit(feedback_str)
+                        
+                    # [New] 서버가 "이제 면접 끝났다"고 신호를 주면 그때 종료
+                    elif mtype == "interview_end":
+                        print("[Log] Server requested interview end. Sending finish flag.")
+                        await self.send_queue.put(json.dumps({"type": "flag", "data": "finish"}))
+                        
+                        # 화면 전환 준비
+                        agg = {"type": "session_log", "items": self._session_log}
+                        self._session_log = [] 
+                        self.sig_feedback_final.emit(agg)
+                        self.sig_transition_to_feedback.emit()
                     
-                    # [New] 최종 리포트 수신 처리
+                    # 최종 리포트 수신 처리
                     elif mtype == "final_analysis":
                         print("[Log] Final Report Received!")
                         # 이 시그널이 FeedbackPage의 버튼을 활성화시킵니다.
