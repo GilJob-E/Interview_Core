@@ -97,14 +97,15 @@ class AIOrchestrator:
         """
         
         try:
-            response = self.groq_client.chat.completions.create(
+            # Groq -> OpenAI로 변경
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o",  # 모델 변경
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": resume_text},
                 ],
-                model="llama-3.3-70b-versatile",
                 temperature=0.5,
-                response_format={"type": "json_object"} # JSON 강제 출력
+                response_format={"type": "json_object"} 
             )
             return json.loads(response.choices[0].message.content)
         except Exception as e:
@@ -113,7 +114,7 @@ class AIOrchestrator:
 
     # LLM1: 면접관 (질문 및 대화 진행)
     def generate_llm_response(self, user_text: str, questions_list: list):
-        model_id = "llama-3.3-70b-versatile" 
+        # model_id = "llama-3.3-70b-versatile" 
         
         # 질문 리스트를 텍스트로 변환
         q_text = "\n".join([f"- {q}" for q in questions_list])
@@ -133,12 +134,14 @@ class AIOrchestrator:
         {q_text}
         """
 
-        return self.groq_client.chat.completions.create(
+        # Groq -> OpenAI로 변경
+        return self.openai_client.chat.completions.create(
+            model="gpt-4o",  # 모델 변경
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_text},
             ],
-            model=model_id,
+            temperature=0.7, # 대화의 자연스러움을 위해 약간 높임
             stream=True 
         )
     # =========================================================================
@@ -321,7 +324,7 @@ class AIOrchestrator:
             return []
         try:
             audio_stream = self.tts_client.text_to_speech.convert(
-                voice_id="JBFqnCBsd6RMkjVDRZzb",
+                voice_id="ZZ4xhVcc83kZBfNIlIIz",
                 output_format="pcm_16000", 
                 text=text,
                 model_id="eleven_turbo_v2_5"
