@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QFileDialog, QScrollArea, QRadioButton, QButtonGroup, QDialog, QTabWidget
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve, QRectF, QPointF
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QColor, QPen, QFont, QBrush, QFontDatabase
+from PyQt6.QtGui import QImage, QPixmap, QPainter, QPainterPath, QColor, QPen, QFont, QBrush
 import qasync
 import websockets
 
@@ -32,9 +32,6 @@ FRAME_WIDTH = 320
 FRAME_HEIGHT = 240  
 VIDEO_SEND_INTERVAL = 0.2
 
-# 폰트 패밀리 이름 저장용 전역 변수 (실행 시 로드됨)
-FONT_FAMILY_NANUM = "Segoe UI"  # 기본값
-
 # ==========================================
 # [설정] Feature 분류
 # ==========================================
@@ -44,15 +41,13 @@ NEGATIVE_FEATURES = ["f1_bandwidth", "pause_duration", "unvoiced_rate", "fillers
 # ==========================================
 # CSS 스타일 정의
 # ==========================================
-# 폰트는 실행 시점에 NanumSquare로 교체됩니다.
 GLOBAL_STYLE = """
     QMainWindow, QWidget#MainBackground {
         background-color: #0b0e14;
     }
     QWidget {
         color: #E2E8F0;
-        /* font-family는 main에서 동적으로 설정됨 */
-        font-size: 14px;
+        font-family: 'Segoe UI', sans-serif;
     }
     QFrame.Card {
         background-color: #151921;
@@ -165,6 +160,8 @@ GLOBAL_STYLE = """
     }
 """
 
+# ... (기존 위젯: WebcamFeedbackWidget, IntroPage 등은 변경 없음, 코드 길이상 생략하지 않고 모두 포함)
+
 class WebcamFeedbackWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -186,6 +183,7 @@ class WebcamFeedbackWidget(QWidget):
     def update_frame(self, pixmap):
         self.lbl_video.setPixmap(pixmap)
 
+# ... (NormalDistributionWidget, AnalysisDetailWidget, TurnWidget, FeedbackDisplayWidget, InterviewOverlay, InterviewPage 등 유지)
 
 class NormalDistributionWidget(QWidget):
     def __init__(self, key_name, title, z_score, value, unit, parent=None):
@@ -201,10 +199,6 @@ class NormalDistributionWidget(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # [폰트 적용] NanumSquare
-        painter.setFont(QFont(FONT_FAMILY_NANUM, 10))
-
         rect = self.rect()
         margin = 15
         graph_rect = QRectF(margin, margin + 25, rect.width() - 2*margin, rect.height() - 2*margin - 25)
@@ -238,14 +232,13 @@ class NormalDistributionWidget(QWidget):
         painter.drawLine(int(user_x_pos), int(graph_rect.top()), int(user_x_pos), int(graph_rect.bottom()))
 
         painter.setPen(QColor("white"))
-        painter.setFont(QFont(FONT_FAMILY_NANUM, 10, QFont.Weight.Bold))
+        painter.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         painter.drawText(rect.adjusted(5, 8, -5, 0), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter, self.title)
         
         percentile = (1 + math.erf(self.z_score / math.sqrt(2))) / 2 * 100
-        painter.setFont(QFont(FONT_FAMILY_NANUM, 8))
+        painter.setFont(QFont("Segoe UI", 8))
         painter.setPen(QColor("#CBD5E0"))
         painter.drawText(rect.adjusted(0, 0, 0, -8), Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter, f"{self.value} {self.unit}\n(상위 {100-percentile:.1f}%)")
-
 
 class AnalysisDetailWidget(QWidget):
     def __init__(self, feedback_data, parent=None):
@@ -372,10 +365,10 @@ class TurnWidget(QFrame):
 class FeedbackDisplayWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(320, 600) # 고정 크기
+        self.setFixedWidth(FRAME_WIDTH)
+        self.setMaximumHeight(200) 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.is_default_mode = True 
-        
         self.setStyleSheet("""
             FeedbackDisplayWidget { background-color: rgba(15, 15, 20, 0.98); border-radius: 10px; border-left: 4px solid #FFD700; }
             QLabel { color: #A0AEC0; font-weight: bold; background: transparent; border: none; }
@@ -436,51 +429,6 @@ class IntroPage(QWidget):
     submitted = pyqtSignal(str); go_to_options = pyqtSignal()
     def __init__(self, parent=None):
         super().__init__(parent)
-        # [폰트 적용] IntroPage 전체에 CookieRun 폰트 적용
-        self.setStyleSheet(f"""
-            QWidget {{
-                font-family: '{FONT_FAMILY_NANUM}';
-                color: #E2E8F0;
-                font-size: 14px;
-            }}
-            /* 다른 위젯 스타일은 GLOBAL_STYLE 상속 안받으므로 여기서 재정의 필요할 수 있음 */
-            QFrame.Card {{
-                background-color: #151921;
-                border: 1px solid #2D3748;
-                border-radius: 15px;
-            }}
-            QLabel.Title {{
-                color: white;
-                font-size: 26px;
-                font-weight: bold;
-            }}
-            QLabel.Subtitle {{
-                color: #A0AEC0;
-                font-size: 14px;
-            }}
-            QPushButton {{
-                background-color: #5D5FEF;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 12px;
-                font-weight: bold;
-                font-size: 14px;
-            }}
-            QPushButton.Secondary {{
-                background-color: #2D3748;
-                color: #A0AEC0;
-            }}
-            QTextEdit {{
-                font-family: '{FONT_FAMILY_NANUM}';
-                background-color: #1A202C;
-                border: 2px dashed #4A5568;
-                border-radius: 12px;
-                color: #CBD5E0;
-                padding: 15px;
-                font-size: 15px;
-            }}
-        """)
         main_layout = QVBoxLayout(self); main_layout.setContentsMargins(20, 20, 20, 20); main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card = QFrame(); card.setProperty("class", "Card"); card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         card_layout = QVBoxLayout(card); card_layout.setSpacing(20); card_layout.setContentsMargins(50, 50, 50, 50)
@@ -492,8 +440,8 @@ class IntroPage(QWidget):
         header_layout.addLayout(text_layout); header_layout.addStretch(); header_layout.addWidget(btn_options)
         card_layout.addLayout(header_layout); card_layout.addSpacing(10)
         upload_layout = QHBoxLayout()
-        lbl_upload = QLabel("Resume / Introduction"); lbl_upload.setStyleSheet(f"font-weight: bold; color: #CBD5E0; font-size: 16px; font-family: '{FONT_FAMILY_NANUM}';")
-        btn_file_upload = QPushButton("📂 파일 불러오기 (.txt)"); btn_file_upload.setFixedSize(160, 40); btn_file_upload.setStyleSheet(f"background-color: #2D3748; font-size: 13px; font-family: '{FONT_FAMILY_NANUM}';"); btn_file_upload.clicked.connect(self.open_file_dialog)
+        lbl_upload = QLabel("Resume / Introduction"); lbl_upload.setStyleSheet("font-weight: bold; color: #CBD5E0; font-size: 16px;")
+        btn_file_upload = QPushButton("📂 파일 불러오기 (.txt)"); btn_file_upload.setFixedSize(160, 40); btn_file_upload.setStyleSheet("background-color: #2D3748; font-size: 13px;"); btn_file_upload.clicked.connect(self.open_file_dialog)
         upload_layout.addWidget(lbl_upload); upload_layout.addStretch(); upload_layout.addWidget(btn_file_upload)
         card_layout.addLayout(upload_layout)
         self.text_edit = QTextEdit(); self.text_edit.setPlaceholderText("여기에 자기소개서를 입력하거나 '파일 불러오기'를 사용하세요..."); self.text_edit.setAcceptRichText(False); self.text_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding); card_layout.addWidget(self.text_edit)
@@ -528,27 +476,6 @@ class InterviewOverlay(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        self.top_bar_height = 100
-        self.bottom_bar_height = 120
-        
-        layout = QGridLayout(self)
-        layout.setContentsMargins(30, 10, 20, 10)
-
-        # 1. AI 텍스트 (상단) - NanumSquare
-        self.lbl_ai_text = QLabel("AI 면접관 연결 중...")
-        self.lbl_ai_text.setStyleSheet(f"""
-            color: #1A202C; 
-            font-family: '{FONT_FAMILY_NANUM}';
-            font-size: 18px;
-            font-weight: 600;
-            background-color: rgba(255, 255, 255, 0.95);
-            padding: 10px;
-            border-radius: 15px;
-        """)
-        self.lbl_ai_text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.lbl_ai_text.setWordWrap(True)
-        self.lbl_ai_text.setFixedHeight(self.top_bar_height - 20) 
-        self.lbl_ai_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         # 새 턴 감지용 플래그 (True면 텍스트 교체, False면 이어붙이기)
         self.expecting_new_ai_turn = True 
         
@@ -573,85 +500,27 @@ class InterviewOverlay(QWidget):
         
         layout.addWidget(self.lbl_ai_text, 0, 0, 1, 12)
         layout.setRowStretch(1, 1)
-
-        # 2. 피드백 위젯
+        
         self.feedback_widget = FeedbackDisplayWidget(self)
         self.feedback_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        layout.addWidget(self.feedback_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
-
-        # 3. 웹캠 위젯
+        layout.addWidget(self.feedback_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
+        
         self.webcam_widget = WebcamFeedbackWidget(self)
         self.webcam_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        layout.addWidget(self.webcam_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
-
-        # 4. 사용자 텍스트 (하단) - NanumSquare
+        layout.addWidget(self.webcam_widget, 2, 8, 2, 4, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        
         self.lbl_user_text = QLabel("")
-        self.lbl_user_text.setStyleSheet(f"""
-            color: #63B3ED; 
-            font-family: '{FONT_FAMILY_NANUM}';
-            font-size: 18px;
-            font-weight: 500;
-            background-color: transparent;
-            padding: 10px;
+        self.lbl_user_text.setStyleSheet("""
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 15px;
+            font-size: 16px;
         """)
         self.lbl_user_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_user_text.setWordWrap(True)
-        self.lbl_user_text.setFixedHeight(self.bottom_bar_height - 20)
         self.lbl_user_text.hide()
         self.lbl_user_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        
-        layout.addWidget(self.lbl_user_text, 2, 0, 1, 12)
-
-        self.user_text_timer = QTimer()
-        self.user_text_timer.setSingleShot(True)
-        self.user_text_timer.timeout.connect(self.fade_out_user_text)
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w = self.width(); h = self.height()
-        bg_color = QColor(11, 14, 20, 255) 
-        line_color = QColor(93, 95, 239)   
-        
-        painter.fillRect(0, 0, w, self.top_bar_height, bg_color)
-        painter.setPen(QPen(line_color, 2))
-        painter.drawLine(0, self.top_bar_height, w, self.top_bar_height)
-        
-        painter.fillRect(0, h - self.bottom_bar_height, w, self.bottom_bar_height, bg_color)
-        painter.drawLine(0, h - self.bottom_bar_height, w, h - self.bottom_bar_height)
-
-    def set_feedback_mode(self, is_default): self.feedback_widget.set_mode(is_default)
-    def update_ai_text(self, text): self.lbl_ai_text.setText(text)
-    def update_user_text(self, text):
-        if text:
-            self.lbl_user_text.setText(f"User: {text}")
-            self.lbl_user_text.show()
-            self.user_text_timer.start(6000) 
-    def fade_out_user_text(self): self.lbl_user_text.hide(); self.lbl_user_text.setText("")
-    def update_webcam(self, pixmap): self.webcam_widget.update_frame(pixmap)
-    def show_realtime_feedback(self, text): self.feedback_widget.add_feedback(text)
-    def set_webcam_border(self, color): self.webcam_widget.set_border_color(color)
-        
-    self.feedback_widget = FeedbackDisplayWidget(self)
-    self.feedback_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-    layout.addWidget(self.feedback_widget, 1, 8, 1, 4, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight)
-    
-    self.webcam_widget = WebcamFeedbackWidget(self)
-    self.webcam_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-    layout.addWidget(self.webcam_widget, 2, 8, 2, 4, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
-    
-    self.lbl_user_text = QLabel("")
-    self.lbl_user_text.setStyleSheet("""
-        background-color: rgba(0, 0, 0, 0.7);
-        color: white;
-        padding: 10px 20px;
-        border-radius: 15px;
-        font-size: 16px;
-    """)
-    self.lbl_user_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    self.lbl_user_text.hide()
-    self.lbl_user_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-    layout.addWidget(self.lbl_user_text, 4, 1, 1, 10)
+        layout.addWidget(self.lbl_user_text, 4, 1, 1, 10)
 
     def set_feedback_mode(self, is_default):
         self.feedback_widget.set_mode(is_default)
@@ -690,85 +559,41 @@ class InterviewOverlay(QWidget):
 class InterviewPage(QWidget):
     def __init__(self):
         super().__init__()
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 배경 라벨
-        self.bg_label = QLabel()
-        self.bg_label.setScaledContents(True)
-        self.bg_label.setStyleSheet("background-color: #0b0e14;")
-        self.layout.addWidget(self.bg_label)
-        
-        # 오버레이
+        self.layout = QVBoxLayout(self); self.layout.setContentsMargins(0, 0, 0, 0)
+        self.bg_label = QLabel(); self.bg_label.setScaledContents(True); self.bg_label.setStyleSheet("background-color: #0b0e14;"); self.layout.addWidget(self.bg_label)
         self.overlay = InterviewOverlay(self)
-        
-        speaking_file = "말하는_일론.mp4"   # 1440x1080
-        listening_file = "듣는_일론.mp4"   # 1920x1080
-        
-        self.cap_speaking = None
-        self.cap_listening = None
-        
-        if os.path.exists(speaking_file):
-            self.cap_speaking = cv2.VideoCapture(speaking_file)
-        else:
-            print(f"[Warning] '{speaking_file}' 파일을 찾을 수 없습니다.")
-
-        if os.path.exists(listening_file):
-            self.cap_listening = cv2.VideoCapture(listening_file)
-        else:
-            print(f"[Warning] '{listening_file}' 파일을 찾을 수 없습니다.")
-
+        speaking_file = "말하는_일론.mp4"; listening_file = "듣는_일론.mp4"
+        self.cap_speaking = None; self.cap_listening = None
+        if os.path.exists(speaking_file): self.cap_speaking = cv2.VideoCapture(speaking_file)
+        if os.path.exists(listening_file): self.cap_listening = cv2.VideoCapture(listening_file)
         self.is_speaking = False 
-        
-        self.bg_timer = QTimer()
-        self.bg_timer.timeout.connect(self.update_background_frame)
-
-    def set_feedback_mode(self, is_default):
-        self.overlay.set_feedback_mode(is_default)
-    
-    def set_speaking_state(self, is_speaking):
-        self.is_speaking = is_speaking
-
-    def resizeEvent(self, event):
-        self.overlay.setGeometry(self.rect())
-        super().resizeEvent(event)
-
+        self.bg_timer = QTimer(); self.bg_timer.timeout.connect(self.update_background_frame)
+    def set_feedback_mode(self, is_default): self.overlay.set_feedback_mode(is_default)
+    def set_speaking_state(self, is_speaking): self.is_speaking = is_speaking
+    def resizeEvent(self, event): self.overlay.setGeometry(self.rect()); super().resizeEvent(event)
     def update_ai_text(self, text): self.overlay.update_ai_text(text)
     def update_user_text(self, text): self.overlay.update_user_text(text)
     def update_webcam_frame(self, q_img): self.overlay.update_webcam(QPixmap.fromImage(q_img))
     def show_realtime_feedback(self, text): self.overlay.show_realtime_feedback(text)
-    def set_webcam_border(self, color): self.overlay.set_webcam_border(color)
-
     def start_video(self):
-        if self.bg_timer: self.bg_timer.start(50) # 20 FPS
+        if self.bg_timer: self.bg_timer.start(50)
     def stop_video(self):
         if self.bg_timer: self.bg_timer.stop()
-        
     def update_background_frame(self):
         active_cap = self.cap_speaking if self.is_speaking else self.cap_listening
         if active_cap is None or not active_cap.isOpened(): return
         ret, frame = active_cap.read()
-        if not ret:
-            active_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            ret, frame = active_cap.read()
-            if not ret: return
-        
-        # [수정된 부분] 1920px 너비인 경우 -> 1440px로 중앙 크롭 (Center Crop)
-        h, w, _ = frame.shape
-        if w == 1920:
-            # 1920 - 1440 = 480 -> 좌우 240px씩 자름
-            start_x = 240
-            end_x = 1920 - 240 # 1680
-            frame = frame[:, start_x:end_x] # Slicing [height, width]
-        
-        # 이제 두 영상 모두 1440x1080 비율이거나 그에 준하는 상태임
-        # 화면 출력용 리사이즈 (1280x800 등 창 크기에 맞춤)
-        # 비율 유지를 위해 1066x800 등으로 맞추거나, 전체 채우기를 위해 강제 리사이즈
+        if not ret: active_cap.set(cv2.CAP_PROP_POS_FRAMES, 0); ret, frame = active_cap.read(); 
+        if not ret: return
         frame = cv2.resize(frame, (1280, 800)) 
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = frame.shape
         self.bg_label.setPixmap(QPixmap.fromImage(QImage(frame.data, w, h, ch * w, QImage.Format.Format_RGB888)))
+    def set_webcam_border(self, color): self.overlay.set_webcam_border(color)
 
+# ==========================================
+# [NEW] 종합 레포트 팝업창 (차트 포함)
+# ==========================================
 class SimpleLineChartWidget(QWidget):
     def __init__(self, data_list, colors, parent=None):
         super().__init__(parent)
@@ -782,9 +607,6 @@ class SimpleLineChartWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # [폰트 적용]
-        painter.setFont(QFont(FONT_FAMILY_NANUM, 9))
-
         margin = 30
         w = self.width() - 2 * margin
         h = self.height() - 2 * margin
@@ -800,9 +622,6 @@ class SimpleLineChartWidget(QWidget):
         painter.drawLine(margin, int(mid_y), margin + w, int(mid_y))
         
         num_points = 0
-        for item in self.data: num_points = max(num_points, len(item['values']))
-        if num_points < 2: return
-        step_x = w / (num_points - 1); idx = 0
         for item in self.data:
             num_points = max(num_points, len(item['values']))
         
@@ -836,9 +655,8 @@ class SimpleLineChartWidget(QWidget):
             
             painter.drawPath(path)
             
-            # Legend 폰트
-            painter.setPen(QColor("white"))
-            painter.drawText(margin + 10 + (idx * 100), margin - 10, lbl)
+            # Simple Legend
+            painter.drawText(margin + 10 + (idx * 80), margin - 10, lbl)
             idx += 1
 
 class AverageZScoreChartWidget(QWidget):
@@ -852,9 +670,6 @@ class AverageZScoreChartWidget(QWidget):
         if not self.avg_data: return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # [폰트 적용]
-        painter.setFont(QFont(FONT_FAMILY_NANUM, 9))
         
         margin_left = 100
         margin_right = 30
@@ -878,19 +693,21 @@ class AverageZScoreChartWidget(QWidget):
             
             y_pos = margin_top + i * bar_height + 5
             bar_h = bar_height - 10
+            
             bar_len = (z / 3.0) * (w / 2)
             
             # Label
             painter.setPen(QColor("white"))
+            painter.setFont(QFont("Segoe UI", 9))
             painter.drawText(QRectF(0, y_pos, margin_left - 10, bar_h), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, key)
             
             # Bar
             if z >= 0:
                 rect = QRectF(mid_x, y_pos, bar_len, bar_h)
-                color = QColor("#68D391") 
+                color = QColor("#68D391") # Green for positive
             else:
                 rect = QRectF(mid_x + bar_len, y_pos, -bar_len, bar_h)
-                color = QColor("#F56565") 
+                color = QColor("#F56565") # Red for negative
                 
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.PenStyle.NoPen)
@@ -909,6 +726,7 @@ class SummaryReportDialog(QDialog):
         self.setStyleSheet(GLOBAL_STYLE + "QDialog { background-color: #1A202C; }")
         
         layout = QVBoxLayout(self)
+        
         title = QLabel("📊 Comprehensive Interview Report")
         title.setProperty("class", "Title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -927,7 +745,7 @@ class SummaryReportDialog(QDialog):
         
         # Positive Chart
         lbl_pos = QLabel("📈 긍정적 요소 변화 (Positive Features Trend)")
-        lbl_pos.setStyleSheet(f"color: #68D391; font-weight: bold; font-size: 14px; margin-top: 10px; font-family: '{FONT_FAMILY_NANUM}';")
+        lbl_pos.setStyleSheet("color: #68D391; font-weight: bold; font-size: 14px; margin-top: 10px;")
         analysis_layout.addWidget(lbl_pos)
         pos_colors = [QColor("#68D391"), QColor("#4FD1C5"), QColor("#63B3ED"), QColor("#F6E05E")]
         chart_pos = SimpleLineChartWidget(pos_data, pos_colors)
@@ -935,7 +753,7 @@ class SummaryReportDialog(QDialog):
         
         # Negative Chart
         lbl_neg = QLabel("📉 부정적 요소 변화 (Negative Features Trend)")
-        lbl_neg.setStyleSheet(f"color: #F56565; font-weight: bold; font-size: 14px; margin-top: 10px; font-family: '{FONT_FAMILY_NANUM}';")
+        lbl_neg.setStyleSheet("color: #F56565; font-weight: bold; font-size: 14px; margin-top: 10px;")
         analysis_layout.addWidget(lbl_neg)
         neg_colors = [QColor("#F56565"), QColor("#FC8181"), QColor("#F687B3"), QColor("#D53F8C")]
         chart_neg = SimpleLineChartWidget(neg_data, neg_colors)
@@ -943,15 +761,20 @@ class SummaryReportDialog(QDialog):
         
         # Average Chart
         lbl_avg = QLabel("📊 전체 평균 분포 (Average Distribution)")
-        lbl_avg.setStyleSheet(f"color: #A0AEC0; font-weight: bold; font-size: 14px; margin-top: 10px; font-family: '{FONT_FAMILY_NANUM}';")
+        lbl_avg.setStyleSheet("color: #A0AEC0; font-weight: bold; font-size: 14px; margin-top: 10px;")
         analysis_layout.addWidget(lbl_avg)
         chart_avg = AverageZScoreChartWidget(all_avgs)
         analysis_layout.addWidget(chart_avg)
+        
         tabs.addTab(tab_analysis, "Feature Analysis")
         
-        tab_summary = QWidget(); summary_layout = QVBoxLayout(tab_summary)
-        text_edit = QTextEdit(); text_edit.setReadOnly(True); text_edit.setText(summary_text)
-        text_edit.setStyleSheet(f"font-size: 16px; line-height: 1.5; color: #E2E8F0; font-family: '{FONT_FAMILY_NANUM}';")
+        # 2. LLM Summary Tab
+        tab_summary = QWidget()
+        summary_layout = QVBoxLayout(tab_summary)
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setText(summary_text)
+        text_edit.setStyleSheet("font-size: 16px; line-height: 1.5; color: #E2E8F0;")
         summary_layout.addWidget(text_edit)
         tabs.addTab(tab_summary, "LLM Summary")
         
@@ -970,6 +793,7 @@ class SummaryReportDialog(QDialog):
                         json_part = content.replace("Analysis:", "").strip().replace("'", '"').replace("None", "null")
                         content = json.loads(json_part)
                     except: content = {}
+                
                 if isinstance(content, dict):
                     mm = content.get("multimodal_features", {})
                     turn_feats = {}
@@ -1003,6 +827,7 @@ class SummaryReportDialog(QDialog):
                     all_avgs[k] = sum(vals) / len(vals)
         
         return pos_trends, neg_trends, all_avgs
+
 
 class FeedbackPage(QWidget):
     def __init__(self):
@@ -1130,7 +955,6 @@ class FeedbackPage(QWidget):
             self.scroll_layout.insertWidget(i, turn_widget)
         self.scroll_layout.addStretch()
 
-# ... (OptionsPage, LoadingOverlay, MainWindow는 기존 로직 유지, imports 포함 필수)
 
 class OptionsPage(QWidget):
     go_back = pyqtSignal()
@@ -1611,16 +1435,6 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    
-    # [FONTS LOAD]
-    font_id_nanum = QFontDatabase.addApplicationFont("NanumSquareR.ttf")
-    if font_id_nanum != -1:
-        FONT_FAMILY_NANUM = QFontDatabase.applicationFontFamilies(font_id_nanum)[0]
-        # Update Global Style Default Font
-        GLOBAL_STYLE = GLOBAL_STYLE.replace("/* font-family는 main에서 동적으로 설정됨 */", f"font-family: '{FONT_FAMILY_NANUM}', 'Segoe UI';")
-    else:
-        print("Failed to load NanumSquare font.")
-
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)
     window = MainWindow()
