@@ -126,6 +126,9 @@ async def interview_endpoint(websocket: WebSocket):
                             
                             cut_amount = max(0, silence_bytes - safe_margin_bytes)
                             
+                            # [Fix] cut_amount가 4의 배수가 되도록 조정 (Alignment)
+                            cut_amount = cut_amount - (cut_amount % 4)
+
                             # 전체 오디오 바이트 생성
                             raw_bytes = bytes(audio_buffer)
                             
