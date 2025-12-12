@@ -31,8 +31,8 @@ async def interview_endpoint(websocket: WebSocket):
         SILENCE_THRESHOLD = 0.03 
         
         # Dynamic VAD Constants
-        BASE_MIN_PAUSE = 0.8  
-        BASE_MAX_PAUSE = 1.5  
+        BASE_MIN_PAUSE = 0.1
+        BASE_MAX_PAUSE = 0.1
         
         checked_intermediate = False
         
@@ -86,8 +86,8 @@ async def interview_endpoint(websocket: WebSocket):
                         current_speech_duration = len(audio_buffer) / 64000.0
                         log_factor = np.log1p(current_speech_duration)
                         
-                        dynamic_min_pause = BASE_MIN_PAUSE + (log_factor * 0.8) 
-                        dynamic_max_pause = BASE_MAX_PAUSE + (log_factor * 1.0) 
+                        dynamic_min_pause = BASE_MIN_PAUSE + (log_factor * 0.5) 
+                        dynamic_max_pause = BASE_MAX_PAUSE + (log_factor * 0.5) 
 
                         current_time = asyncio.get_event_loop().time()
                         silence_duration = current_time - silence_start_time
@@ -239,7 +239,15 @@ async def interview_endpoint(websocket: WebSocket):
                             # 5. LLM2 (면접 코치) - Async Task
                             async def send_coach_feedback_task(u_text, s_result, a_text):
                                 print("[Coach] Generating Feedback (GPT-4o)...")
-                                c_msg = await ai_engine.generate_instant_feedback(u_text, s_result)
+                                
+                                # history 전달 (interview_context는 상위 스코프 변수)
+                                current_history = interview_context["history"]
+                                
+                                c_msg = await ai_engine.generate_instant_feedback(
+                                    u_text, 
+                                    s_result, 
+                                    current_history # [New] 기억력 주입
+                                )
                                 print(f"[Coach]: {c_msg}")
                                 
                                 await websocket.send_json({"type": "coach_feedback", "data": c_msg})
@@ -314,7 +322,7 @@ async def interview_endpoint(websocket: WebSocket):
                             interview_context["questions_queue"] = deque(generated_qs)
 
                         # 첫 질문 (고정)
-                        initial_question = "만나서 반갑습니다. 먼저 간단하게 자기소개를 해주세요"
+                        initial_question = "안녕하세요! 테슬라 면접에 오신걸 환영합니다. 먼저 간단하게 자기소개를 해주세요"
                         print(f"[AI] Start: {initial_question}")
                         
                         await websocket.send_json({"type": "ai_text", "data": initial_question})
