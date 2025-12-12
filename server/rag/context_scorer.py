@@ -62,7 +62,7 @@ class ContextScorer:
 
         details = {}
 
-        # 1. 토큰 오버랩 (40%)
+        # 1. 토큰 오버랩 (20%)
         token_score = self._token_overlap_score(response, retrieved_docs)
         details['token_overlap'] = round(token_score, 3)
 
@@ -71,15 +71,15 @@ class ContextScorer:
         details['doc_reference'] = round(doc_score, 3)
         details['referenced_doc_count'] = referenced_docs
 
-        # 3. 의미적 유사도 (30%) - 임베딩 기반
+        # 3. 의미적 유사도 (50%) - 임베딩 기반
         semantic_score = self._semantic_similarity_score(response, retrieved_docs)
         details['semantic_similarity'] = round(semantic_score, 3)
 
         # 가중 평균
         final_score = (
-            token_score * 0.4 +
+            token_score * 0.2 +
             doc_score * 0.3 +
-            semantic_score * 0.3
+            semantic_score * 0.5
         )
 
         details['final_score'] = round(final_score, 3)
