@@ -185,29 +185,28 @@ async def interview_endpoint(websocket: WebSocket):
                                 "data": speak_result
                             })
 
-                            # 5. LLM2 (면접 코치) 실시간 피드백 생성
-                            print("[Coach] Generating Instant Feedback...")
-                            coach_msg = await ai_engine.generate_instant_feedback(user_text, speak_result)
-                            
-                            print(f"[Coach Suggestion]: {coach_msg}")
-                            await websocket.send_json({
-                                "type": "coach_feedback",
-                                "data": coach_msg
-                            })
+                            # 5. LLM2 (면접 코치)
+                            async def send_coach_feedback_task(u_text, s_result):
+                                print("[Coach] Generating Feedback (GPT-4o)...")
+                                c_msg = await ai_engine.generate_instant_feedback(u_text, s_result)
+                                print(f"[Coach]: {c_msg}")
+                                
+                                # 클라이언트 전송
+                                await websocket.send_json({"type": "coach_feedback", "data": c_msg})
+                                
+                                # 히스토리에 추가 (스레드 안전성 고려 필요하지만, 간단한 리스트 append는 Python에서 atomic함)
+                                interview_context["turn_count"] += 1
+                                interview_context["history"].append({
+                                    "turn_id": interview_context["turn_count"],
+                                    "user_text": u_text,
+                                    "ai_text": full_ai_text, # 상위 스코프 변수 사용 주의
+                                    "stats": s_result,
+                                    "coach_feedback": c_msg
+                                })
 
-                            # 6. [New] 히스토리 저장 (History Tracking)
-                            interview_context["turn_count"] += 1
-                            turn_data = {
-                                "turn_id": interview_context["turn_count"],
-                                "user_text": user_text,
-                                "ai_text": full_ai_text,
-                                "stats": speak_result,
-                                "coach_feedback": coach_msg
-                            }
-                            interview_context["history"].append(turn_data)
-                            print(f"[History] Turn {interview_context['turn_count']} saved.")
-                            
-                            print("[Turn] Cycle Completed.")
+                            # 태스크 생성 (기다리지 않고 넘어감)
+                            asyncio.create_task(send_coach_feedback_task(user_text, speak_result))
+                            print("[Turn] Cycle Completed (Listening Mode ON)")
                     else:
                         pre_speech_buffer.append(data)
 

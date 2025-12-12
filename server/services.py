@@ -1,10 +1,11 @@
 import os
 import io
-import json  # [New] JSON 데이터 처리용
+import json  # JSON 데이터 처리용
 import numpy as np
 import soundfile as sf
 from groq import Groq
 from elevenlabs.client import ElevenLabs
+from openai import OpenAI # OpenAI 추가
 from dotenv import load_dotenv
 import asyncio
 
@@ -24,6 +25,10 @@ class AIOrchestrator:
         # 3. TTS
         self.tts_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
         print("[TTS] ElevenLabs Client Connected.")
+
+        # 4. Analysis (GPT-4o)
+        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        print("[LLM2] OpenAI (GPT-4o) Client Connected.")
 
     def transcribe_audio(self, audio_data: np.ndarray):
         try:
@@ -224,15 +229,19 @@ class AIOrchestrator:
             - Quantifiers: {quantifier.get('value', 0)} ratio (Z: {quantifier.get('z_score', 0)})
             """
 
-            # 4. LLM 호출
-            response = self.groq_client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                model="llama-3.3-70b-versatile",
-                temperature=0.6,
-                max_tokens=150
+            # 4. GPT-4o 호출
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.openai_client.chat.completions.create(
+                    model="gpt-4o", # 고급 모델 사용
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.5,
+                    max_tokens=100
+                )
             )
             
             return response.choices[0].message.content
@@ -268,36 +277,39 @@ class AIOrchestrator:
             전체 면접 데이터를 분석하여, 지원자에게 도움이 되는 [최종 분석 리포트]를 작성해주세요.
             
             [작성 양식 (Markdown)]
-            # 📊 면접 종합 리포트
+            # 면접 종합 리포트
             
             ## 1. 총평 (100점 만점 점수 포함)
-            - 전체적인 인상과 점수
+            - 전체적인 인상, 태도, 자소서 및 면접맥락에 기반한 답변 내용의 논리성을 종합적으로 평가
+
+            ## 2. 상세 분석 (데이터 기반)
+            - **비언어적 요소:** 시선 처리, 목소리 크기, 발음 정확도, 표정 등 (Z-Score 데이터 참고)
+            - **언어적 요소:** 답변의 길이, 두괄식 여부, 추임새 사용 빈도 등
             
-            ## 2. 강점 (Good Points)
-            - 데이터에 기반한 칭찬 (예: 시선 처리가 안정적임, 목소리 톤이 신뢰감 있음)
+            ## 3. 강점 (Good Points)
+            - 지원자가 잘한 점 3가지
             
-            ## 3. 개선할 점 (Weak Points)
-            - 구체적인 데이터 근거 (예: Turn 3에서 말이 빨라짐, 답변이 두서없음)
+            ## 4. 개선할 점 (Weak Points)
+            - 지원자가 반드시 고쳐야 할 점 3가지와 구체적인 해결 방안
             
-            ## 4. Action Plan
+            ## 5. Action Plan
             - 다음 면접을 위해 구체적으로 연습해야 할 점
             """
 
-            # 동기 함수인 Groq 호출을 별도 스레드에서 실행하여 메인 루프 차단 방지
+            # GPT-4o 호출 (Non-blocking)
             loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None, 
-                lambda: self.groq_client.chat.completions.create(
+                lambda: self.openai_client.chat.completions.create(
+                    model="gpt-4o",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": history_text},
                     ],
-                    model="llama-3.3-70b-versatile",
                     temperature=0.6,
-                    max_tokens=1500 # 리포트는 기니까 토큰 넉넉히
+                    max_tokens=2000 # 리포트는 길게
                 )
             )
-            
             return response.choices[0].message.content
 
         except Exception as e:
