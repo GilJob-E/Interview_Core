@@ -158,15 +158,17 @@ class AIOrchestrator:
     # [New] LLM2: 면접 코치 (실시간 피드백 & 최종 평가)
     # =========================================================================
 
-    async def generate_instant_feedback(self, user_text: str, analysis_result: dict):
+    async def generate_instant_feedback(self, user_text: str, analysis_result: dict, history: list = []):
         """
-        [LLM2] 턴별 실시간 피드백 생성 (Z-Score 기반 정밀 분석)
+        [LLM2] GPT-4o 기반 실시간 코칭 (Memory: 최근 3턴 추세 분석 기능 추가)
         """
         try:
-            # 1. 데이터 추출
+            # ---------------------------------------------------------
+            # 1. 현재 턴 데이터 추출
+            # ---------------------------------------------------------
             features = analysis_result.get("multimodal_features", {})
             
-            # (A) Audio Features
+            # (A) Audio
             audio = features.get("audio", {})
             # pitch = audio.get("pitch", {})  # 제거됨
             intensity = audio.get("intensity", {})
@@ -174,57 +176,83 @@ class AIOrchestrator:
             pause = audio.get("pause_duration", {})
             unvoiced = audio.get("unvoiced_duration", {}) 
             
-            # (B) Video Features
+            # (B) Video
             video = features.get("video", {})
             eye = video.get("eye_contact", {})
             smile = video.get("smile", {})
             # nod = video.get("head_nod", {}) # 제거됨
             
-            # (C) Text Features
+            # (C) Text
             text_feat = features.get("text", {})
             wpsec = text_feat.get("wpsec", {}) # Speed
             upsec = text_feat.get("upsec", {}) # Diversity
             fillers = text_feat.get("fillers", {})
-            quantifier = text_feat.get("quantifier", {}) # [New]
+            quantifier = text_feat.get("quantifier", {})
 
-            # 2. 시스템 프롬프트 
+            # ---------------------------------------------------------
+            # 2. [New] 과거 3턴 데이터 요약 (Trend Analysis)
+            # ---------------------------------------------------------
+            past_context_str = "없음 (첫 번째 턴입니다)"
+            
+            if history:
+                past_context_str = ""
+                # 최근 3개 턴만 가져오기
+                recent_turns = history[-3:]
+                
+                for idx, turn in enumerate(recent_turns):
+                    t_stats = turn.get('stats', {}).get('multimodal_features', {})
+                    
+                    # 과거 데이터 안전하게 추출
+                    p_vol = t_stats.get('audio', {}).get('intensity', {}).get('z_score', 0)
+                    p_eye = t_stats.get('video', {}).get('eye_contact', {}).get('z_score', 0)
+                    p_spd = t_stats.get('text', {}).get('wpsec', {}).get('z_score', 0)
+                    
+                    past_context_str += f"""
+                    - [Turn {turn.get('turn_id')}]: Volume(Z={p_vol:.1f}), Eye(Z={p_eye:.1f}), Speed(Z={p_spd:.1f})
+                      (Coach Feedback: "{turn.get('coach_feedback', 'N/A')}")
+                    """
+            # ---------------------------------------------------------
+            # 3. 시스템 프롬프트 (추세 분석 지시 추가)
+            # ---------------------------------------------------------
             system_prompt = f"""
             한글로 답변하세요.
             당신은 데이터 기반의 'AI 면접 코치'입니다. 
             지원자의 답변("{user_text}")과 [멀티모달 데이터]를 분석하여, 즉시 교정해야 할 점을 1~2문장으로 조언하세요.
 
             [데이터 해석 가이드 (중요)]
-            제공되는 수치는 Z-Score(표준점수)를 포함합니다. Z-Score가 ±1.0을 벗어나면 '평균과 다름'을 의미하므로 주의 깊게 보십시오.
+            제공되는 수치는 Z-Score(표준점수)를 포함합니다. Z-Score가 제시된 기준 범위에 포함되면 '평균과 다름'을 의미하므로 주의 깊게 보십시오.
             
             1. 오디오 (Audio)
-            - Intensity (음량): Z < -0.91 → 목소리 작음, 자신감 부족 (감점) 상관계수 : (0.06, 0.08)
-            - F1 Bandwidth (명료도): Z > 5.99 → 발성 긴장 (감점) 상관계수 : (-0.11, -0.12)
-            - Pause Duration (침묵): Z > 13.17 → 답변 지연, 망설임 (감점) 상관계수 : (-0.09, -0.09)
-            - Unvoiced Rate (무성음 비율): Z > 6.39 → 발음 불명확 (감점) 상관계수 : (-0.08, -0.11)
+            - Intensity (음량): Z < -0.06 → 목소리 작음, 자신감 부족 (감점) 상관계수 : (0.06, 0.08)
+            - F1 Bandwidth (명료도): Z > 2.85 → 발성 긴장 (감점) 상관계수 : (-0.11, -0.12)
+            - Pause Duration (침묵): Z > 0.70 → 답변 지연, 망설임 (감점) 상관계수 : (-0.09, -0.09)
+            - Unvoiced Rate (무성음 비율): Z > 1.85 → 발음 불명확 (감점) 상관계수 : (-0.08, -0.11)관계수 : (-0.08, -0.11)
 
             2. 비전 (Video)
             - Eye Contact (시선): Z < -3.66 → 시선 회피 (감점) 상관계수 : (0.08, 0.08)
             - Smile (표정): Z < -1.34 → 표정 굳음 (감점), Z > -0.92 (부자연스러움) 상관계수 : (0.08, 0.1)
 
             3. 텍스트 (Text)
-            - WPSEC (말하기 속도): Z > 0.48 (빠름/긴장), Z < -4.60 (느림/자신감 부족) 상관계수 : (0.1, 0.13)
-            - UPSEC (어휘 다양성): Z < -4.18 → 단조로운 표현 반복 (감점) 상관계수 : (0.08, 0.1)
-            - Fillers ("음, 어, 그" 빈도): Z > -0.49 → 추임새 많음 (감점) 상관계수 : (-0.08, -0.12)
-            - Quantifiers (수치 언급): Z < -5.71 (구체성 부족), Z > 10.09 (숫자만 나열) 상관계수 : (0.09, 0.08)
+            - WPSEC (말하기 속도): Z > 0.69 (빠름/긴장), Z < -4.95 (느림/자신감 부족) 상관계수 : (0.1, 0.13)
+            - UPSEC (어휘 다양성): Z < -100 → 단조로운 표현 반복 (감점) 상관계수 : (0.08, 0.1)
+            - Fillers ("음, 어, 그" 빈도): Z > -0.41 → 추임새 많음 (감점) 상관계수 : (-0.08, -0.12)
+            - Quantifiers (수치 언급): Z < -4.46 (구체성 부족), Z > 2.06 (숫자만 나열) 상관계수 : (0.09, 0.08)
 
             [작성 규칙]
             - 한글로 답변하세요.
-            - 상관계수 합의 절대값이 큰 feature의 z-score값이 튀는 경우를 가장 먼저 지적하세요
-            - Z-Score가 튀는 항목(제시된 기준값을 넘어가는 상황)을 지적하세요.
+            - 상관계수 합의 절대값이 큰 feature의 z-score값이 튀는 경우(제시된 기준값에 포함되는 상황)를 가장 먼저 지적하세요
+            - 직접적으로 z-score 값에 대한 언급은 하지말고 Z-Score가 튀는 항목(제시된 기준값에 포함되는 상황)을 지적하세요.
+	        - [과거 3턴의 데이터]를 참고하여 이번턴에 유의미한 개선이 있었다면 격려하세요.
             - 모든 수치가 정상 범위라면 "태도가 안정적입니다. 지금처럼 답변하세요."라고 칭찬하세요.
             - 말투는 "해요체"로 정중하지만 단호하게 코칭하세요.
             """
             
             # 3. 사용자 프롬프트 
             user_prompt = f"""
-            [지원자 답변]: "{user_text}"
+            [과거 3턴 기록 (Trends)]
+            {past_context_str}
             
-            [분석 데이터]
+            [현재 턴 분석 데이터]
             1. Audio
             - Intensity: {intensity.get('value', 0)}dB (Z: {intensity.get('z_score', 0)})
             - F1 Bandwidth: {F1_Band.get('value', 0)}Hz (Z: {F1_Band.get('z_score', 0)})
@@ -242,7 +270,7 @@ class AIOrchestrator:
             - Quantifiers: {quantifier.get('value', 0)} ratio (Z: {quantifier.get('z_score', 0)})
             """
 
-            # 4. GPT-4o 호출
+            # 5. GPT-4o 호출
             loop = asyncio.get_running_loop()
             response = await loop.run_in_executor(
                 None,
@@ -252,7 +280,7 @@ class AIOrchestrator:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    temperature=0.5,
+                    temperature=0.6,
                     max_tokens=100
                 )
             )
