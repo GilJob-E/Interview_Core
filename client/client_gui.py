@@ -481,6 +481,7 @@ class IntroPage(QWidget):
                 font-size: 15px;
             }}
         """)
+
         main_layout = QVBoxLayout(self); main_layout.setContentsMargins(20, 20, 20, 20); main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card = QFrame(); card.setProperty("class", "Card"); card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         card_layout = QVBoxLayout(card); card_layout.setSpacing(20); card_layout.setContentsMargins(50, 50, 50, 50)
@@ -800,9 +801,6 @@ class SimpleLineChartWidget(QWidget):
         painter.drawLine(margin, int(mid_y), margin + w, int(mid_y))
         
         num_points = 0
-        for item in self.data: num_points = max(num_points, len(item['values']))
-        if num_points < 2: return
-        step_x = w / (num_points - 1); idx = 0
         for item in self.data:
             num_points = max(num_points, len(item['values']))
         
@@ -1612,7 +1610,6 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     
-    # [FONTS LOAD]
     font_id_nanum = QFontDatabase.addApplicationFont("NanumSquareR.ttf")
     if font_id_nanum != -1:
         FONT_FAMILY_NANUM = QFontDatabase.applicationFontFamilies(font_id_nanum)[0]
