@@ -284,6 +284,186 @@ class RAGEvaluator:
                 "expected_occupation": "ICT",
                 "expected_experience": "EXPERIENCED"
             },
+
+            # ===== 추가 쿼리 (기술/프로젝트 경험) =====
+            {
+                "query": "저는 Spring Boot와 JPA를 활용해서 주문 관리 시스템을 개발했습니다. REST API 설계와 데이터베이스 최적화를 담당했고, 처리 속도를 30% 개선했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "React와 TypeScript로 대시보드를 구현했습니다. 차트 라이브러리와 상태관리를 적용해서 실시간 데이터 시각화 기능을 만들었습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "NEW"
+            },
+            {
+                "query": "AWS 인프라 구축 경험이 있습니다. EC2, RDS, S3를 활용했고, CloudWatch로 모니터링 시스템을 구성했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "마이크로서비스 아키텍처로 전환하는 프로젝트에 참여했습니다. Kafka를 이용한 이벤트 기반 통신을 구현했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "Python과 TensorFlow로 이미지 분류 모델을 개발했습니다. 정확도 92%를 달성했고 Flask API로 서빙했습니다.",
+                "expected_occupation": "RND",
+                "expected_experience": "NEW"
+            },
+            {
+                "query": "CI/CD 파이프라인을 Jenkins와 Docker로 구축했습니다. 배포 시간을 1시간에서 10분으로 단축했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "MongoDB와 Redis를 활용한 캐싱 시스템을 설계했습니다. 조회 성능이 5배 향상되었습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "Kubernetes 클러스터 운영 경험이 있습니다. HPA를 적용해서 트래픽 급증에도 안정적으로 운영했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "GraphQL API를 설계하고 Apollo Server로 구현했습니다. N+1 문제를 DataLoader로 해결했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "Elasticsearch를 이용한 검색 엔진을 구축했습니다. 한글 형태소 분석기를 적용해서 검색 정확도를 높였습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+
+            # ===== 추가 쿼리 (문제 해결/트러블슈팅) =====
+            {
+                "query": "프로덕션에서 메모리 누수가 발생했을 때, 힙 덤프 분석으로 원인을 찾아 해결했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "동시성 이슈로 데이터 정합성 문제가 생겼는데, 분산 락을 적용해서 해결했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "API 응답 시간이 3초 이상 걸리는 문제가 있었습니다. 쿼리 튜닝과 인덱스 최적화로 200ms 이내로 개선했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "서버 장애 시 빠른 복구를 위해 블루-그린 배포 전략을 도입했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "보안 취약점 점검에서 SQL 인젝션 위험이 발견되어 prepared statement로 전면 수정했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "대용량 파일 업로드 시 타임아웃 문제를 청크 업로드 방식으로 해결했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "외부 API 연동 시 장애 전파를 막기 위해 서킷 브레이커 패턴을 적용했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+
+            # ===== 추가 쿼리 (협업/커뮤니케이션) =====
+            {
+                "query": "애자일 스크럼 방식으로 2주 스프린트를 진행했고, 데일리 스탠드업에서 진행 상황을 공유했습니다.",
+                "expected_occupation": "BM",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "기획팀과 협업할 때 기술적 제약사항을 비전문가도 이해할 수 있게 설명하려고 노력했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "코드 리뷰 문화를 정착시키기 위해 리뷰 가이드라인을 만들고 팀에 공유했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "주니어 개발자 온보딩을 담당하면서 페어 프로그래밍으로 지식을 전달했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "여러 팀이 참여하는 프로젝트에서 API 스펙을 먼저 정의하고 문서화해서 병렬 개발이 가능하게 했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "갈등 상황에서 각자의 입장을 경청하고 데이터 기반으로 의사결정을 유도했습니다.",
+                "expected_occupation": "BM",
+                "expected_experience": "EXPERIENCED"
+            },
+
+            # ===== 추가 쿼리 (지원동기/성장) =====
+            {
+                "query": "이 회사의 기술 블로그를 보고 엔지니어링 문화에 매력을 느꼈습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "NEW"
+            },
+            {
+                "query": "대규모 트래픽을 처리하는 시스템을 경험하고 싶어서 지원했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "NEW"
+            },
+            {
+                "query": "개발자로서 5년 후에는 기술 리드 역할을 하고 싶습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "NEW"
+            },
+            {
+                "query": "새로운 기술을 배우는 것을 좋아해서, 사이드 프로젝트로 Rust를 공부하고 있습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "NEW"
+            },
+            {
+                "query": "실패했던 프로젝트에서 요구사항 분석의 중요성을 배웠습니다.",
+                "expected_occupation": "BM",
+                "expected_experience": "NEW"
+            },
+            {
+                "query": "팀 전체의 생산성을 높이는 도구를 만드는 것에 보람을 느낍니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+
+            # ===== 긴 답변 (상세 서술형) =====
+            {
+                "query": "저는 레거시 모놀리식 시스템을 마이크로서비스 아키텍처로 전환하는 프로젝트를 리드했습니다. 기존 시스템은 10년 이상 운영되어 코드 복잡도가 높았고, 하나의 변경이 전체 시스템에 영향을 주는 상황이었습니다. 먼저 도메인 주도 설계 방법론으로 바운디드 컨텍스트를 정의했고, 스트랭글러 패턴을 적용해서 점진적으로 마이그레이션을 진행했습니다. 서비스 간 통신은 Kafka를 이용한 이벤트 기반으로 설계했고, API Gateway로 라우팅을 관리했습니다. 6개월간 진행한 결과, 배포 주기가 월 1회에서 주 3회로 단축되었고, 장애 영향 범위도 크게 줄었습니다. 가장 어려웠던 점은 데이터 일관성을 유지하면서 전환하는 것이었는데, 이중 쓰기와 이벤트 소싱으로 해결했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "전자상거래 플랫폼에서 블랙프라이데이 트래픽 급증에 대응하는 성능 최적화 프로젝트를 담당했습니다. 기존 시스템은 초당 1000건의 주문을 처리했는데, 목표는 10배인 초당 10000건이었습니다. 먼저 APM 도구로 병목 지점을 분석했고, 데이터베이스 쿼리가 가장 큰 문제였습니다. 읽기 작업은 Redis 캐시로 분산하고, 쓰기 작업은 비동기 큐로 처리하도록 변경했습니다. 또한 데이터베이스 커넥션 풀을 튜닝하고, 인덱스를 최적화했습니다. 인프라 측면에서는 오토스케일링을 설정하고, CDN을 적용해서 정적 리소스 부하를 줄였습니다. 최종적으로 초당 15000건까지 처리 가능해졌고, 실제 이벤트에서도 무장애로 운영할 수 있었습니다. 이 경험을 통해 성능 최적화는 측정과 분석이 가장 중요하다는 것을 배웠습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "5명 규모의 백엔드 개발팀을 리드한 경험이 있습니다. 처음 팀을 맡았을 때 가장 큰 과제는 코드 품질 향상과 개발 프로세스 정립이었습니다. 먼저 코드 리뷰 문화를 도입했는데, 처음에는 거부감이 있었습니다. 그래서 제가 먼저 리뷰를 요청하고, 리뷰 시간을 업무 시간으로 인정하는 방식으로 자연스럽게 정착시켰습니다. 테스트 커버리지 목표도 설정해서 70% 이상을 유지하도록 했고, CI 파이프라인에서 자동으로 체크하게 만들었습니다. 또한 주간 기술 공유 세션을 열어서 각자 배운 것을 발표하게 했습니다. 6개월 후에는 버그 발생률이 40% 감소했고, 팀원들의 기술 역량도 눈에 띄게 성장했습니다. 리더로서 가장 중요한 것은 솔선수범과 심리적 안전감 조성이라고 생각합니다.",
+                "expected_occupation": "BM",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "서비스 오픈 직후 대규모 장애가 발생했던 경험이 있습니다. 오후 2시경 갑자기 API 응답 시간이 급격히 증가하면서 5XX 에러가 발생했습니다. 즉시 워룸을 구성하고 원인 분석에 들어갔습니다. 로그를 분석해보니 특정 쿼리가 테이블 풀스캔을 하면서 데이터베이스에 부하를 주고 있었습니다. 해당 쿼리는 신규 기능에서 추가된 것이었는데, 테스트 환경과 달리 프로덕션 데이터가 훨씬 많아서 문제가 된 것이었습니다. 긴급하게 해당 기능을 피처 플래그로 비활성화하고, 인덱스를 추가한 후 복구했습니다. 총 장애 시간은 47분이었습니다. 이후 포스트모템을 진행해서, 대용량 데이터 테스트 환경 구축, 슬로우 쿼리 모니터링 알람, 피처 플래그 필수화 등의 개선 사항을 도출했습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
+            {
+                "query": "새 프로젝트에서 기술 스택을 선정하는 과정을 리드했습니다. 요구사항은 실시간 데이터 처리와 높은 확장성이었습니다. 후보로 Spring Boot + Kafka, Node.js + Redis Pub/Sub, Go + NATS 세 가지 조합을 검토했습니다. 각 옵션에 대해 POC를 진행하고, 성능 벤치마크, 팀의 학습 곡선, 운영 복잡도, 커뮤니티 지원 등을 평가했습니다. 결과적으로 Spring Boot + Kafka를 선택했는데, 이유는 팀원 대부분이 자바에 익숙했고, Kafka의 메시지 보장 수준이 요구사항에 적합했기 때문입니다. Go가 성능은 더 좋았지만, 팀 전체가 새로운 언어를 학습하는 비용과 리스크를 고려했습니다. 이 경험을 통해 기술 선택은 단순히 기술적 우위만이 아니라 팀의 상황과 비즈니스 맥락을 종합적으로 고려해야 한다는 것을 배웠습니다.",
+                "expected_occupation": "ICT",
+                "expected_experience": "EXPERIENCED"
+            },
         ]
 
         # 샘플링

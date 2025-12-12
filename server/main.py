@@ -24,14 +24,14 @@ async def interview_endpoint(websocket: WebSocket):
 
         # Audio Buffer & VAD Variables
         audio_buffer = bytearray()
-        pre_speech_buffer = deque(maxlen=5)
+        pre_speech_buffer = deque(maxlen=3)
 
         silence_start_time = 0
         is_speaking = False
         SILENCE_THRESHOLD = 0.03
 
         # Dynamic VAD Constants (중간 끊김 방지를 위해 상향)
-        BASE_MIN_PAUSE = 1.2
+        BASE_MIN_PAUSE = 0.8
         BASE_MAX_PAUSE = 2.5
 
         checked_intermediate = False
