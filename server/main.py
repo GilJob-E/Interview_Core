@@ -113,9 +113,33 @@ async def interview_endpoint(websocket: WebSocket):
                         # --- [턴 종료 처리 및 분석 시작] ---
                         if should_process:
                             print(f"[VAD Trigger] Final Silence: {silence_duration:.2f}s")
-                            full_audio_bytes = bytes(audio_buffer)
-                            full_audio_np = np.frombuffer(full_audio_bytes, dtype=np.float32)
+
+                            # [수정] VAD 대기 시간(Final Silence)만큼 오디오 뒷부분 자르기
+                            # Sample Rate: 16000, Dtype: float32 (4 bytes) -> 64,000 bytes/sec
+                            bytes_per_sec = 16000 * 4
+                            silence_bytes = int(silence_duration * bytes_per_sec)
+                            
+                            # 버퍼 길이보다 더 많이 자르지 않도록 방어 로직 (최소 0.1초는 남기거나 안전장치)
+                            # 너무 빡빡하게 자르면 문장 끝이 짤릴 수 있으므로 0.2초 정도 여유(buffer)를 두고 자름.
+                            safe_margin_sec = 0.2
+                            safe_margin_bytes = int(safe_margin_sec * bytes_per_sec)
+                            
+                            cut_amount = max(0, silence_bytes - safe_margin_bytes)
+                            
+                            # 전체 오디오 바이트 생성
+                            raw_bytes = bytes(audio_buffer)
+                            
+                            # 뒷부분 자르기 (Trimming)
+                            if cut_amount < len(raw_bytes):
+                                trimmed_bytes = raw_bytes[:-cut_amount]
+                            else:
+                                trimmed_bytes = raw_bytes # 예외 시 원본 사용
+
+                            # 넘파이 배열 변환 (자른 데이터 사용)
+                            full_audio_np = np.frombuffer(trimmed_bytes, dtype=np.float32)
                             duration_sec = len(full_audio_np) / 16000
+                            
+                            print(f"[Audio Trim] Original: {len(raw_bytes)}B -> Trimmed: {len(trimmed_bytes)}B (Removed {silence_duration:.2f}s tail)")
                             
                             # 1. STT (Final)
                             print("[STT] Transcribing Final...")
@@ -140,7 +164,7 @@ async def interview_endpoint(websocket: WebSocket):
                             print(f"[Vision] Flushing accumulated stats...")
                             analysis_task = asyncio.create_task(
                                 analyzer.analyze_turn(
-                                    audio_bytes=full_audio_bytes,
+                                    audio_bytes=trimmed_bytes,
                                     text_data=user_text,
                                     duration=duration_sec
                                 )
