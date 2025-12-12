@@ -5,7 +5,6 @@ from widgets.feedback_items import FeedbackDisplayWidget
 from widgets.video import WebcamFeedbackWidget
 import settings
 
-# LoadingOverlay는 변경 없음 (생략)
 class LoadingOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,8 +36,7 @@ class InterviewOverlay(QWidget):
         self.expecting_new_ai_turn = True
         
         layout = QGridLayout(self)
-        # [수정] 상단 여백 10으로 축소
-        layout.setContentsMargins(30, 10, 20, 10) 
+        layout.setContentsMargins(30, 30, 20, 10) 
 
         # 1. AI 텍스트
         self.lbl_ai_text = QLabel("AI 면접관 연결 중...")
@@ -61,17 +59,17 @@ class InterviewOverlay(QWidget):
         layout.setRowStretch(1, 1)
 
         # 2. 피드백 위젯 (애니메이션을 위해 Layout에서 제거하고 수동 배치)
-        # 생성은 하되 레이아웃에 추가하지 않고 parent만 지정
         self.feedback_widget = FeedbackDisplayWidget(self)
         self.feedback_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         # 초기 위치는 화면 오른쪽 바깥
         self.feedback_visible = False
         
-        # 3. 웹캠 위젯 (우측 하단) - 마진 25로 축소
+        # 3. 웹캠 위젯 (우측 하단)
         self.webcam_wrapper = QWidget()
         self.webcam_wrapper.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         wrapper_layout = QVBoxLayout(self.webcam_wrapper)
-        wrapper_layout.setContentsMargins(0, 0, 0, 25) # [요구사항] 하단 마진 5 줄임 (30->25)
+        # [수정] 하단 마진 30
+        wrapper_layout.setContentsMargins(0, 0, 0, 30)
         wrapper_layout.setSpacing(0)
         
         self.webcam_widget = WebcamFeedbackWidget(self)
@@ -93,6 +91,7 @@ class InterviewOverlay(QWidget):
         self.lbl_user_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_user_text.setWordWrap(True)
         self.lbl_user_text.setFixedHeight(self.bottom_bar_height - 20)
+        # [수정] hide() 제거 (공간 차지)
         self.lbl_user_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         
         layout.addWidget(self.lbl_user_text, 2, 0, 1, 12)
@@ -102,20 +101,21 @@ class InterviewOverlay(QWidget):
         self.user_text_timer.timeout.connect(self.fade_out_user_text)
 
     def resizeEvent(self, event):
-        # 화면 크기가 변경될 때 피드백 위젯 위치 재조정
+        # 화면 크기가 변경될 때 피드백 위젯 위치 및 크기 재조정
         super().resizeEvent(event)
         
+        # [수정] 창 높이의 50%로 피드백 위젯 높이 가변 설정 (최소 200px)
+        new_height = max(200, int(self.height() * 0.53)-120)
+        self.feedback_widget.setFixedHeight(new_height)
+
         fw = self.feedback_widget.width()
-        fh = self.feedback_widget.height()
+        # fh는 위에서 설정됨
         
-        # 목표 Y 위치: AI 텍스트(Row 0) 아래쪽, 조금 더 아래로 (topMargin + height)
         target_y = self.top_bar_height + 20 
         
         if self.feedback_visible:
-            # 이미 보이고 있다면 우측 정렬 위치 유지
             target_x = self.width() - fw - 20
         else:
-            # 숨겨져 있다면 화면 오른쪽 밖
             target_x = self.width() 
             
         self.feedback_widget.move(target_x, target_y)
@@ -157,7 +157,6 @@ class InterviewOverlay(QWidget):
     def update_webcam(self, pixmap): self.webcam_widget.update_frame(pixmap)
     
     def show_realtime_feedback(self, text):
-        # [NEW] 최초 피드백 시 슬라이드 애니메이션
         if not self.feedback_visible:
             self.feedback_visible = True
             
