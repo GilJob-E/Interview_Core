@@ -6,6 +6,7 @@ import soundfile as sf
 from groq import Groq
 from elevenlabs.client import ElevenLabs
 from dotenv import load_dotenv
+import asyncio
 
 load_dotenv()
 
@@ -114,13 +115,13 @@ class AIOrchestrator:
         
         system_prompt = f"""
         당신은 베테랑 면접관이자 업계의 시니어입니다. 
-        지원자의 답변("{user_text}")에 대해 자연스럽게 반응하고 대화를 이어가세요.
+        지원자의 답변("{user_text}")에 대해 자연스럽고 예리하게 반응하며 대화를 이어가세요.
         
         [지침]
-        1. 답변이 부족하면 꼬리질문을 하세요.
-        2. 답변이 충분하면, 아래 [질문 리스트] 중 하나를 자연스럽게 화제를 전환하며 물어보세요.
-        3. 대화하듯이 진행하고, 2~3문장 이내로 짧고 간결하게 답변하세요.
-        4. 한국어로 답변하세요. 한글과 영어를 제외한 문자를 출력하지 마세요.
+        1. 한글로 답변하세요.
+        2. 답변이 부족하면 꼬리질문을 하세요.
+        3. 답변이 충분하면, 아래 [질문 리스트] 중 하나를 자연스럽게 화제를 전환하며 물어보세요.
+        4. 대화하듯이 진행하고, 2~3문장 이내로 짧고 간결하게 답변하세요.
         5. 문맥상 어색한 단어는 문맥에 맞는 전문용어로 추론하여 내부적으로 해석하세요.
 
         [질문 리스트]
@@ -169,9 +170,10 @@ class AIOrchestrator:
             quantifier = text_feat.get("quantifier", {}) # [New]
 
             # 2. 시스템 프롬프트 
-            system_prompt = """
+            system_prompt = f"""
+            한글로 답변하세요.
             당신은 데이터 기반의 'AI 면접 코치'입니다. 
-            지원자의 [답변]과 [멀티모달 데이터]를 분석하여, 즉시 교정해야 할 점을 1~2문장으로 조언하세요.
+            지원자의 답변("{user_text}")과 [멀티모달 데이터]를 분석하여, 즉시 교정해야 할 점을 1~2문장으로 조언하세요.
 
             [데이터 해석 가이드 (중요)]
             제공되는 수치는 Z-Score(표준점수)를 포함합니다. Z-Score가 ±1.0을 벗어나면 '평균과 다름'을 의미하므로 주의 깊게 보십시오.
@@ -193,6 +195,7 @@ class AIOrchestrator:
             - Quantifiers (수치 언급): Z < -5.71 (구체성 부족), Z > 10.09 (숫자만 나열) 상관계수 : (0.09, 0.08)
 
             [작성 규칙]
+            - 한글로 답변하세요.
             - 상관계수 합의 절대값이 큰 feature의 z-score값이 튀는 경우를 가장 먼저 지적하세요
             - Z-Score가 튀는 항목(제시된 기준값을 넘어가는 상황)을 지적하세요.
             - 모든 수치가 정상 범위라면 "태도가 안정적입니다. 지금처럼 답변하세요."라고 칭찬하세요.
@@ -244,6 +247,9 @@ class AIOrchestrator:
         - 입력: 전체 대화 기록 및 턴별 분석 데이터 리스트
         - 출력: 마크다운 형태의 종합 평가서
         """
+        if not interview_history:
+            return "대화 히스토리 없음"
+
         try:
             # 히스토리를 텍스트로 변환
             history_text = ""
@@ -277,14 +283,19 @@ class AIOrchestrator:
             - 다음 면접을 위해 구체적으로 연습해야 할 점
             """
 
-            response = self.groq_client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": history_text},
-                ],
-                model="llama-3.3-70b-versatile",
-                temperature=0.6,
-                max_tokens=1000 
+            # 동기 함수인 Groq 호출을 별도 스레드에서 실행하여 메인 루프 차단 방지
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None, 
+                lambda: self.groq_client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": history_text},
+                    ],
+                    model="llama-3.3-70b-versatile",
+                    temperature=0.6,
+                    max_tokens=1500 # 리포트는 기니까 토큰 넉넉히
+                )
             )
             
             return response.choices[0].message.content

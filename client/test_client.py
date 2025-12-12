@@ -149,6 +149,16 @@ async def run_client():
                                 print(f"\n[Coach]: {res['data']}")
                                 print("-" * 50)
 
+                            # [New] 최종 리포트 수신 및 종료 처리
+                            elif msg_type == "final_analysis":
+                                print("\n" + "="*60)
+                                print("[면접 종료] 최종 종합 리포트")
+                                print("="*60)
+                                print(res['data'])  # 마크다운 텍스트 출력
+                                print("\n" + "="*60)
+                                print("프로그램을 종료합니다.")
+                                return # 루프 탈출 및 프로그램 
+
                             elif msg_type == "feedback":
                                 # 상세 분석 결과 출력
                                 print("\n[Analysis Result]")
@@ -204,6 +214,8 @@ async def run_client():
                 await asyncio.sleep(0.001)
 
         except KeyboardInterrupt:
+            print("\n[Client] Sending finish flag...")
+            finish_msg = json.dumps({"type": "flag", "data": "finish"})
             print("\nStopped.")
         finally:
             cap.release() # 카메라 해제

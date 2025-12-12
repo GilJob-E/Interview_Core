@@ -32,14 +32,16 @@ async def interview_endpoint(websocket: WebSocket):
         
         # Dynamic VAD Constants
         BASE_MIN_PAUSE = 0.8  
-        BASE_MAX_PAUSE = 2.5  
+        BASE_MAX_PAUSE = 1.5  
         
         checked_intermediate = False
         
-        # [핵심] 인터뷰 컨텍스트 (자소서 텍스트 및 질문 리스트 관리)
+        # 인터뷰 컨텍스트 (자소서 텍스트 및 질문 리스트 관리)
         interview_context = {
             "intro_text": "",
             "questions_queue": deque(), # LLM이 참고할 핵심 질문 리스트 (사라지지 않음)
+            "history": [],      # [New] 대화 기록 저장소
+            "turn_count": 0     # [New] 턴 횟수 카운터
         }
 
         # ------------------------------------------------------------------
@@ -152,12 +154,14 @@ async def interview_endpoint(websocket: WebSocket):
                             llm_stream = ai_engine.generate_llm_response(user_text, current_questions)
                             
                             buffer = "" 
+                            full_ai_text = "" # [New] AI 전체 답변 저장용
                             print("[TTS] Streaming Start...")
                             
                             for chunk in llm_stream:
                                 if chunk.choices[0].delta.content:
                                     token = chunk.choices[0].delta.content
                                     buffer += token
+                                    full_ai_text += token # [New] 토큰 누적
                                     if any(punct in token for punct in [".", "?", "!", "\n"]):
                                         sentence = buffer.strip()
                                         if sentence:
@@ -191,6 +195,18 @@ async def interview_endpoint(websocket: WebSocket):
                                 "data": coach_msg
                             })
 
+                            # 6. [New] 히스토리 저장 (History Tracking)
+                            interview_context["turn_count"] += 1
+                            turn_data = {
+                                "turn_id": interview_context["turn_count"],
+                                "user_text": user_text,
+                                "ai_text": full_ai_text,
+                                "stats": speak_result,
+                                "coach_feedback": coach_msg
+                            }
+                            interview_context["history"].append(turn_data)
+                            print(f"[History] Turn {interview_context['turn_count']} saved.")
+                            
                             print("[Turn] Cycle Completed.")
                     else:
                         pre_speech_buffer.append(data)
@@ -257,9 +273,45 @@ async def interview_endpoint(websocket: WebSocket):
                         if frame is not None:
                             analyzer.process_vision_frame(frame)
 
+                    # [3] 종료 신호 처리
+                    elif msg_type == "flag" and payload.get("data") == "finish":
+                        print("\n[Interview Finished] Generating Final Report...")
+                        # 루프 탈출 -> 리포트 생성 단계로 이동
+                        break
+
                 except Exception as e:
                     print(f"[JSON Process Error] {e}")
                     pass
+            
+        # ------------------------------------------------------------------
+        # 3. 면접 종료 후 종합 리포트 생성 (수정됨)
+        # ------------------------------------------------------------------
+        if not interview_context['history']:
+            print("[Report] No history found. Skipping report.")
+            final_report = "대화 히스토리 없음"
+        else:
+            print(f"[Report] Analyzing {len(interview_context['history'])} turns... (Please Wait)")
+            
+            # (선택) 클라이언트에게 "분석 중" 알림 보내기
+            # await websocket.send_json({"type": "ai_text", "data": "면접 결과를 분석 중입니다. 잠시만 기다려주세요..."})
+
+            # LLM2에게 전체 히스토리 넘기기 (services.py 수정으로 인해 Non-blocking으로 동작함)
+            final_report = await ai_engine.generate_final_report(interview_context["history"])
+        
+        print("\n" + "="*60)
+        print("[FINAL REPORT]")
+        print("-" * 60)
+        print(final_report) 
+        print("="*60 + "\n")
+
+        # 클라이언트에게 리포트 전송
+        await websocket.send_json({
+            "type": "final_analysis",
+            "data": final_report
+        })
+        
+        # 연결 종료 대기
+        await asyncio.sleep(1)
 
     except WebSocketDisconnect:
         print("[WS] Client Disconnected")

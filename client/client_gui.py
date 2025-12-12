@@ -1296,8 +1296,10 @@ class MainWindow(QMainWindow):
                         feedback_str = data.get("message", str(data)) if isinstance(data, dict) else str(data)
                         self.sig_feedback_realtime.emit(feedback_str)
                     
-                    elif mtype == "feedback_summary":
-                        # [NEW] Handle Summary Report
+                    # [New] 최종 리포트 수신 처리
+                    elif mtype == "final_analysis":
+                        print("[Log] Final Report Received!")
+                        # 이 시그널이 FeedbackPage의 버튼을 활성화시킵니다.
                         self.sig_feedback_summary.emit(str(data))
 
                 elif isinstance(message, bytes):
