@@ -105,7 +105,7 @@ class InterviewOverlay(QWidget):
         super().resizeEvent(event)
         
         # [수정] 창 높이의 50%로 피드백 위젯 높이 가변 설정 (최소 200px)
-        new_height = max(200, int(self.height() * 0.53)-120)
+        new_height = max(200, int(self.height())-520)
         self.feedback_widget.setFixedHeight(new_height)
 
         fw = self.feedback_widget.width()

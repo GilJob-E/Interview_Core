@@ -1,3 +1,5 @@
+# main_window.py
+
 import asyncio
 import json
 import cv2
@@ -10,7 +12,6 @@ import websockets
 from PyQt6.QtWidgets import QMainWindow, QStackedWidget
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QImage, QKeyEvent
-
 
 import settings
 from pages.intro_page import IntroPage
@@ -43,6 +44,10 @@ class MainWindow(QMainWindow):
         self.feedback_mode = True
         self.dev_mode = False 
         
+        # [NEW] 인트로 모드 관리 변수
+        self.is_intro_mode = False       # 인트로 영상 재생 중인지 확인
+        self.intro_audio_buffer = []     # 인트로 중 수신된 TTS 오디오 버퍼
+        
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
 
@@ -56,9 +61,13 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.page_interview)
         self.stack.addWidget(self.page_feedback)
 
+        # Signal Connections
         self.page_intro.submitted.connect(self.handle_intro_submit)
         self.page_intro.go_to_options.connect(lambda: self.stack.setCurrentIndex(1))
         self.page_options.go_back.connect(lambda: self.stack.setCurrentIndex(0))
+        
+        # [NEW] InterviewPage에서 인트로 끝났다는 신호 연결
+        self.page_interview.sig_intro_finished.connect(self.handle_intro_finished)
 
         self.sig_ai_text.connect(self.page_interview.update_ai_text)
         self.sig_user_text.connect(self.page_interview.update_user_text)
@@ -95,7 +104,6 @@ class MainWindow(QMainWindow):
         self.tts_check_timer.setInterval(100) 
         self.tts_check_timer.timeout.connect(self.check_tts_finished)
     
-    # [NEW] 개발자 모드: 스페이스바 누르면 다음 페이지로 이동
     def keyPressEvent(self, event: QKeyEvent):
         if self.dev_mode and event.key() == Qt.Key.Key_Space:
             current_idx = self.stack.currentIndex()
@@ -106,12 +114,10 @@ class MainWindow(QMainWindow):
 
     def update_expected_questions(self, count):
         self.expected_questions = count
-        print(f"[Log] Expected Questions Updated: {count}")
 
     def update_feedback_mode(self, mode: bool):
         self.feedback_mode = mode
         self.page_interview.set_feedback_mode(mode)
-        print(f"[Log] Feedback Mode Updated: {'Default' if mode else 'All Analysis'} ({mode})")
 
     def handle_intro_submit(self, json_payload):
         if not self.dev_mode:
@@ -119,7 +125,6 @@ class MainWindow(QMainWindow):
         
         self.loading_overlay.setGeometry(self.rect())
         self.loading_overlay.show()
-        print(f"[Log] Intro Submitted.")
         QTimer.singleShot(2000, self._on_intro_done)
 
     def _on_intro_done(self):
@@ -129,19 +134,38 @@ class MainWindow(QMainWindow):
     def go_to_interview(self):
         if self.stack.currentIndex() != 2:
             self.stack.setCurrentIndex(2)
+            
+            # [NEW] 인터뷰 페이지 진입 시 인트로 모드 활성화
+            self.is_intro_mode = True
+            self.intro_audio_buffer = [] # 버퍼 초기화
+            
             self.page_interview.start_video()
             self.timer.start(30)
             self.start_main_audio_devices() 
 
+    # [NEW] 인트로 영상 종료 시 호출되는 슬롯
+    def handle_intro_finished(self):
+        print("[Logic] Intro finished. Releasing buffered TTS...")
+        self.is_intro_mode = False
+        
+        # 버퍼링된 오디오가 있다면 재생 큐에 넣고 말하기 상태로 전환
+        if self.intro_audio_buffer:
+            for chunk in self.intro_audio_buffer:
+                self.audio_play_queue.put(chunk)
+            
+            # 버퍼 비우기
+            self.intro_audio_buffer = []
+            
+            # AI 말하기 상태 강제 시작 (말하는일론.mp4 재생됨)
+            self.sig_set_ai_speaking.emit(True)
+
     def handle_transition_to_feedback_page(self):
-        print("[Log] Transitioning to Feedback Page (Waiting for final data...)")
         self.page_interview.stop_video()
         self.timer.stop()
         self.stop_main_audio_devices() 
         self.stack.setCurrentIndex(3)
 
     def handle_feedback_final_data(self, data):
-        print("[Log] Final Data Received. Displaying Report.")
         self.page_feedback.show_feedback(data)
 
     def resizeEvent(self, event):
@@ -149,6 +173,18 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
 
     def process_webcam(self):
+        # [NEW] 인트로 중이거나 AI가 말하는 중이면 웹캠 전송 안함
+        if self.is_intro_mode or self.is_ai_speaking:
+            # 화면 업데이트용 프레임만 읽고 전송은 패스
+            # (Webcam 위젯에는 내 얼굴이 보여야 하므로 읽기는 계속 함)
+            ret, frame = self.cap.read()
+            if ret and self.stack.currentIndex() == 2:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = frame_rgb.shape
+                q_img = QImage(frame_rgb.data, w, h, ch*w, QImage.Format.Format_RGB888)
+                self.page_interview.update_webcam_frame(q_img)
+            return
+
         ret, frame = self.cap.read()
         if not ret: return
         
@@ -159,9 +195,6 @@ class MainWindow(QMainWindow):
         if self.stack.currentIndex() == 2:
             self.page_interview.update_webcam_frame(q_img)
             
-            if self.is_ai_speaking:
-                return
-
             cur_time = time.time()
             if cur_time - self.last_video_send_time > settings.VIDEO_SEND_INTERVAL:
                 if not self.dev_mode:
@@ -171,15 +204,19 @@ class MainWindow(QMainWindow):
                 self.last_video_send_time = cur_time
 
     def main_audio_input_callback(self, indata, frames, time, status):
-        if status: print(f"[Audio Input Error] {status}")
-        if self.is_ai_speaking: return
+        if status: print(f"[Audio Input] {status}")
+        
+        # [NEW] 인트로 중이거나 AI가 말하는 중이면 오디오 전송 차단
+        if self.is_intro_mode or self.is_ai_speaking: 
+            return
 
         data_bytes = indata.tobytes()
         if self.main_loop and self.main_loop.is_running() and not self.dev_mode:
             self.main_loop.call_soon_threadsafe(self.send_queue.put_nowait, data_bytes)
 
     def main_audio_output_callback(self, outdata, frames, time, status):
-        if status: print(f"[Audio Output Status] {status}")
+        # 오디오 출력(스피커) 로직은 그대로 유지 (큐에서 꺼내서 재생)
+        if status: print(f"[Audio Output] {status}")
         bytes_needed = frames * settings.CHANNELS * 2 
         data = bytearray()
         try:
@@ -210,30 +247,26 @@ class MainWindow(QMainWindow):
             )
             self.output_stream.start()
             self.main_stream_started = True
-            print("[Log] Audio Streams Active.")
         except Exception as e:
             print(f"[Error] Audio Start Failed: {e}")
 
     def stop_main_audio_devices(self):
         if not self.main_stream_started: return
-        print("[Log] Stopping Audio Streams...")
         try:
-            if self.input_stream:
-                self.input_stream.stop()
-                self.input_stream.close()
-                self.input_stream = None
-            if self.output_stream:
-                self.output_stream.stop()
-                self.output_stream.close()
-                self.output_stream = None
+            if self.input_stream: self.input_stream.stop(); self.input_stream.close(); self.input_stream = None
+            if self.output_stream: self.output_stream.stop(); self.output_stream.close(); self.output_stream = None
             self.main_stream_started = False
         except Exception as e:
             print(f"[Error] Audio Stop Failed: {e}")
 
     def buffer_audio(self, data):
-        self.audio_play_queue.put(data)
-        if not self.is_ai_speaking:
-            self.sig_set_ai_speaking.emit(True)
+        # [NEW] 인트로 중이면 임시 버퍼에 저장, 아니면 바로 재생 큐에 저장
+        if self.is_intro_mode:
+            self.intro_audio_buffer.append(data)
+        else:
+            self.audio_play_queue.put(data)
+            if not self.is_ai_speaking:
+                self.sig_set_ai_speaking.emit(True)
 
     def set_ai_speaking_state(self, is_speaking):
         self.is_ai_speaking = is_speaking
@@ -242,23 +275,22 @@ class MainWindow(QMainWindow):
         if is_speaking:
             self.page_interview.set_webcam_border("red")
             self.tts_check_timer.start()
-            print("[Log] AI Speaking Started (Input Blocked)")
         else:
             self.page_interview.set_webcam_border("green")
             self.tts_check_timer.stop()
-            print("[Log] AI Speaking Finished (Input Resumed)")
 
     def check_tts_finished(self):
         if self.audio_play_queue.empty() and self.is_ai_speaking:
-            self.sig_set_ai_speaking.emit(False)
+            # 인트로 중이 아닐 때만 발화 종료 처리 (인트로 중에는 버퍼링 중이므로 종료하면 안 됨)
+            if not self.is_intro_mode:
+                self.sig_set_ai_speaking.emit(False)
 
     async def run_client(self):
         self.main_loop = asyncio.get_running_loop()
         
         if self.dev_mode:
             print("[DevMode] Running in Offline Developer Mode.")
-            while True:
-                await asyncio.sleep(1) # Keep Alive
+            while True: await asyncio.sleep(1)
                 
         while True:
             try:
@@ -268,7 +300,7 @@ class MainWindow(QMainWindow):
                     print("[Log] Connected to server!")
                     await asyncio.gather(self.send_loop(), self.receive_loop())
             except (OSError, asyncio.TimeoutError, websockets.InvalidStatusCode) as e:
-                print(f"[Log] Connection failed: {e}. Retrying in 3 seconds...")
+                print(f"[Log] Connection failed: {e}. Retrying...")
                 await asyncio.sleep(3)
             except Exception as e:
                 print(f"[Error] Unexpected: {e}")
@@ -288,15 +320,13 @@ class MainWindow(QMainWindow):
                     mtype = res.get("type")
                     data = res.get("data")
                     
-                    print(f"[Recv] Type: {mtype} | Length: {len(str(data))}")
-
                     if mtype in ["ai_text", "user_text", "coach_feedback", "feedback"]:
                         self._session_log.append({"type": mtype, "content": data})
 
                     if mtype == "ai_text":
+                        # 텍스트는 인트로 중이어도 미리 보여줄지, 아닐지 결정해야 함.
+                        # 여기서는 미리 보여주도록 처리 (영상과 싱크를 맞추려면 이 부분도 버퍼링 필요할 수 있음)
                         self.sig_ai_text.emit(data)
-                        if self.turn_count == self.expected_questions - 1:
-                            print("[Log] Entering final turn...")
 
                     elif mtype == "user_text":
                         self.sig_user_text.emit(data)
@@ -304,12 +334,8 @@ class MainWindow(QMainWindow):
                     elif mtype == "coach_feedback":
                         self.sig_feedback_realtime.emit(str(data))
                         self.turn_count += 1
-                        print(f"[Log] Turn finished. Count: {self.turn_count} / {self.expected_questions}")
-                        
                         if self.turn_count >= self.expected_questions:
-                            print("[Log] All turns finished. Sending finish flag.")
                             await self.send_queue.put(json.dumps({"type": "flag", "data": "finish"}))
-                            
                             agg = {"type": "session_log", "items": self._session_log}
                             self._session_log = [] 
                             self.sig_feedback_final.emit(agg)
@@ -320,13 +346,11 @@ class MainWindow(QMainWindow):
                         self.sig_feedback_realtime.emit(feedback_str)
                     
                     elif mtype == "final_analysis":
-                        print("[Log] Final Report Received!")
                         self.sig_feedback_summary.emit(data)
 
                 elif isinstance(message, bytes):
                     self.sig_play_audio.emit(message)
             except websockets.ConnectionClosed:
-                print("[Log] Connection closed by server.")
                 break
             except Exception as e:
                 print(f"[Error] Receive Loop: {e}")
