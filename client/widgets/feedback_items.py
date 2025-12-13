@@ -130,11 +130,7 @@ class TurnWidget(QFrame):
 class FeedbackDisplayWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        
-        # [수정] 높이 가변성을 위해 setFixedSize 대신 setFixedWidth 사용
-        # 높이는 부모(InterviewOverlay)의 resizeEvent에서 제어됨
         self.setFixedWidth(300) 
-        
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.is_default_mode = True 
         
@@ -165,10 +161,8 @@ class FeedbackDisplayWidget(QWidget):
         
         self.text_view = QTextEdit()
         self.text_view.setReadOnly(True)
-        # 텍스트뷰 높이 최소값 설정 (가변 높이 대응)
         self.text_view.setMinimumHeight(80) 
         self.text_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        
         layout.addLayout(nav_layout); layout.addWidget(self.text_view)
         
         self.history = []; self.current_index = -1; self.refresh_ui()
@@ -201,11 +195,113 @@ class FeedbackDisplayWidget(QWidget):
             self.btn_next.setEnabled(self.current_index < total - 1)
 
 # ==========================================
-# 4. 역량 분석 탭 (SkillsAnalysisTab)
+# 4. [NEW] 질문별 상세 피드백 탭
+# ==========================================
+class DetailedFeedbackTab(QWidget):
+    def __init__(self, feedback_data: list, parent=None):
+        super().__init__(parent)
+        self.feedback_data = feedback_data
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ font-family: '{settings.FONT_FAMILY_NANUM}'; border: none; background-color: transparent; }}")
+        content = QWidget()
+        content.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; background-color: transparent;")
+        content_layout = QVBoxLayout(content)
+        content_layout.setSpacing(20)
+
+        for i, item in enumerate(self.feedback_data):
+            card = self._create_feedback_card(i + 1, item)
+            content_layout.addWidget(card)
+
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+
+    def _create_feedback_card(self, num: int, data: dict) -> QFrame:
+        """
+        [수정] 레이아웃 순서 변경:
+        질문(Q) -> 내 답변(A) -> 피드백(Analysis) -> 의도(Intent) -> 예시(Example)
+        """
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{
+                font-family: '{settings.FONT_FAMILY_NANUM}';
+                background-color: #2D3748;
+                border-radius: 10px;
+                padding: 15px;
+            }}
+        """)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setSpacing(12)
+
+        # 1. 질문 (Q)
+        question_text = data.get('question', '')
+        header = QLabel(f"Q{num}. {question_text}")
+        header.setWordWrap(True)
+        header.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 16px; font-weight: bold; color: #63B3ED;")
+        card_layout.addWidget(header)
+
+        # 2. 내 답변 (A)
+        my_answer_label = QLabel("📝 내 답변")
+        my_answer_label.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 13px; font-weight: bold; color: #A0AEC0; margin-top: 5px;")
+        card_layout.addWidget(my_answer_label)
+
+        my_answer = QLabel(data.get('user_answer', '답변 없음'))
+        my_answer.setWordWrap(True)
+        my_answer.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 14px; color: #CBD5E0; padding: 10px; background-color: #1A202C; border-radius: 5px;")
+        card_layout.addWidget(my_answer)
+
+        # 3. 답변 분석 (Feedback) - [위치 변경됨]
+        analysis_label = QLabel("📊 답변 분석")
+        analysis_label.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 13px; font-weight: bold; color: #68D391; margin-top: 10px;")
+        card_layout.addWidget(analysis_label)
+
+        analysis_text = QLabel(data.get('answer_analysis', '분석 없음'))
+        analysis_text.setWordWrap(True)
+        analysis_text.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 14px; color: #E2E8F0; padding: 10px; background-color: #4A5568; border-radius: 5px;")
+        card_layout.addWidget(analysis_text)
+
+        # 4. 질문 의도 (Intent)
+        intent_label = QLabel("🎯 질문 의도")
+        intent_label.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 13px; font-weight: bold; color: #F6E05E; margin-top: 10px;")
+        card_layout.addWidget(intent_label)
+
+        intent_text = QLabel(data.get('question_intent', '분석 없음'))
+        intent_text.setWordWrap(True)
+        intent_text.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 14px; color: #E2E8F0; padding: 10px; background-color: #4A5568; border-radius: 5px;")
+        card_layout.addWidget(intent_text)
+
+        # 5. 예시 답안 (Example)
+        example_label = QLabel("💡 예시 답안")
+        example_label.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 13px; font-weight: bold; color: #4FD1C5; margin-top: 10px;")
+        card_layout.addWidget(example_label)
+
+        example_text = QLabel(data.get('example_answer', '예시 답안 없음'))
+        example_text.setWordWrap(True)
+        example_text.setStyleSheet(f"""
+            font-family: '{settings.FONT_FAMILY_NANUM}';
+            font-size: 14px;
+            color: #E2E8F0;
+            padding: 15px;
+            background-color: #234E52;
+            border-radius: 5px;
+            border-left: 4px solid #4FD1C5;
+        """)
+        card_layout.addWidget(example_text)
+
+        return card
+
+# ==========================================
+# 5. [Moved Here] 역량 분석 탭
 # ==========================================
 class SkillsAnalysisTab(QWidget):
-    """역량 분석 및 직무 추천을 표시하는 탭 위젯"""
-
     def __init__(self, skills_data: dict, parent=None):
         super().__init__(parent)
         self.skills_data = skills_data or {}
@@ -314,52 +410,3 @@ class SkillsAnalysisTab(QWidget):
             no_data.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; color: #718096; font-style: italic;")
             frame_layout.addWidget(no_data)
         return frame
-
-# ==========================================
-# 5. [NEW] 질문별 상세 피드백 탭 - 누락되었던 부분
-# ==========================================
-class DetailedFeedbackTab(QWidget):
-    def __init__(self, feedback_data: list, parent=None):
-        super().__init__(parent)
-        self.feedback_data = feedback_data
-        self._init_ui()
-
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(f"QScrollArea {{ font-family: '{settings.FONT_FAMILY_NANUM}'; border: none; background-color: transparent; }}")
-        content = QWidget()
-        content.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; background-color: transparent;")
-        content_layout = QVBoxLayout(content)
-        content_layout.setSpacing(20)
-
-        for i, item in enumerate(self.feedback_data):
-            card = QFrame()
-            card.setStyleSheet(f"QFrame {{ font-family: '{settings.FONT_FAMILY_NANUM}'; background-color: #2D3748; border-radius: 10px; padding: 15px; }}")
-            card_layout = QVBoxLayout(card); card_layout.setSpacing(12)
-            
-            question_text = item.get('question', '')
-            header = QLabel(f"Q{i+1}. {question_text}")
-            header.setWordWrap(True)
-            header.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 16px; font-weight: bold; color: #63B3ED;")
-            card_layout.addWidget(header)
-            
-            my_answer_label = QLabel("📝 내 답변")
-            my_answer_label.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 13px; font-weight: bold; color: #A0AEC0; margin-top: 5px;")
-            card_layout.addWidget(my_answer_label)
-            
-            my_answer = QLabel(item.get('user_answer', '답변 없음'))
-            my_answer.setWordWrap(True)
-            my_answer.setStyleSheet(f"font-family: '{settings.FONT_FAMILY_NANUM}'; font-size: 14px; color: #CBD5E0; padding: 10px; background-color: #1A202C; border-radius: 5px;")
-            card_layout.addWidget(my_answer)
-            
-            # ... (질문 의도, 답변 분석, 예시 답안 등 필요한 필드 추가 가능) ...
-            
-            content_layout.addWidget(card)
-
-        content_layout.addStretch()
-        scroll.setWidget(content)
-        layout.addWidget(scroll)

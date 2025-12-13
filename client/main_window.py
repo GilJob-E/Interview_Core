@@ -44,8 +44,9 @@ class MainWindow(QMainWindow):
         self.feedback_mode = True
         self.dev_mode = False 
         
-        # [NEW] 인트로 모드 관리 변수
+        # [NEW] 상태 관리 변수
         self.is_intro_mode = False       # 인트로 영상 재생 중인지 확인
+        self.is_finishing = False        # 면접 종료 프로세스 진입 여부 (TTS 대기용)
         self.intro_audio_buffer = []     # 인트로 중 수신된 TTS 오디오 버퍼
         
         self.stack = QStackedWidget()
@@ -66,7 +67,7 @@ class MainWindow(QMainWindow):
         self.page_intro.go_to_options.connect(lambda: self.stack.setCurrentIndex(1))
         self.page_options.go_back.connect(lambda: self.stack.setCurrentIndex(0))
         
-        # [NEW] InterviewPage에서 인트로 끝났다는 신호 연결
+        # InterviewPage에서 인트로 끝났다는 신호 연결
         self.page_interview.sig_intro_finished.connect(self.handle_intro_finished)
 
         self.sig_ai_text.connect(self.page_interview.update_ai_text)
@@ -135,15 +136,15 @@ class MainWindow(QMainWindow):
         if self.stack.currentIndex() != 2:
             self.stack.setCurrentIndex(2)
             
-            # [NEW] 인터뷰 페이지 진입 시 인트로 모드 활성화
+            # 인터뷰 페이지 진입 시 인트로 모드 활성화 및 초기화
             self.is_intro_mode = True
-            self.intro_audio_buffer = [] # 버퍼 초기화
+            self.is_finishing = False
+            self.intro_audio_buffer = [] 
             
             self.page_interview.start_video()
             self.timer.start(30)
             self.start_main_audio_devices() 
 
-    # [NEW] 인트로 영상 종료 시 호출되는 슬롯
     def handle_intro_finished(self):
         print("[Logic] Intro finished. Releasing buffered TTS...")
         self.is_intro_mode = False
@@ -153,13 +154,13 @@ class MainWindow(QMainWindow):
             for chunk in self.intro_audio_buffer:
                 self.audio_play_queue.put(chunk)
             
-            # 버퍼 비우기
             self.intro_audio_buffer = []
             
             # AI 말하기 상태 강제 시작 (말하는일론.mp4 재생됨)
             self.sig_set_ai_speaking.emit(True)
 
     def handle_transition_to_feedback_page(self):
+        print("[Logic] Transitioning to Feedback Page...")
         self.page_interview.stop_video()
         self.timer.stop()
         self.stop_main_audio_devices() 
@@ -173,10 +174,9 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
 
     def process_webcam(self):
-        # [NEW] 인트로 중이거나 AI가 말하는 중이면 웹캠 전송 안함
+        # 인트로 중이거나 AI가 말하는 중이면 웹캠 전송 안함
         if self.is_intro_mode or self.is_ai_speaking:
             # 화면 업데이트용 프레임만 읽고 전송은 패스
-            # (Webcam 위젯에는 내 얼굴이 보여야 하므로 읽기는 계속 함)
             ret, frame = self.cap.read()
             if ret and self.stack.currentIndex() == 2:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -206,7 +206,7 @@ class MainWindow(QMainWindow):
     def main_audio_input_callback(self, indata, frames, time, status):
         if status: print(f"[Audio Input] {status}")
         
-        # [NEW] 인트로 중이거나 AI가 말하는 중이면 오디오 전송 차단
+        # 인트로 중이거나 AI가 말하는 중이면 오디오 전송 차단
         if self.is_intro_mode or self.is_ai_speaking: 
             return
 
@@ -215,7 +215,6 @@ class MainWindow(QMainWindow):
             self.main_loop.call_soon_threadsafe(self.send_queue.put_nowait, data_bytes)
 
     def main_audio_output_callback(self, outdata, frames, time, status):
-        # 오디오 출력(스피커) 로직은 그대로 유지 (큐에서 꺼내서 재생)
         if status: print(f"[Audio Output] {status}")
         bytes_needed = frames * settings.CHANNELS * 2 
         data = bytearray()
@@ -260,7 +259,7 @@ class MainWindow(QMainWindow):
             print(f"[Error] Audio Stop Failed: {e}")
 
     def buffer_audio(self, data):
-        # [NEW] 인트로 중이면 임시 버퍼에 저장, 아니면 바로 재생 큐에 저장
+        # 인트로 중이면 임시 버퍼에 저장, 아니면 바로 재생 큐에 저장
         if self.is_intro_mode:
             self.intro_audio_buffer.append(data)
         else:
@@ -280,10 +279,17 @@ class MainWindow(QMainWindow):
             self.tts_check_timer.stop()
 
     def check_tts_finished(self):
+        # 큐가 비었고 AI가 말하는 중 상태라면
         if self.audio_play_queue.empty() and self.is_ai_speaking:
-            # 인트로 중이 아닐 때만 발화 종료 처리 (인트로 중에는 버퍼링 중이므로 종료하면 안 됨)
+            # 인트로 중이 아닐 때만 발화 종료 처리
             if not self.is_intro_mode:
                 self.sig_set_ai_speaking.emit(False)
+                
+                # [NEW] 면접 종료 대기 중이었고, 이제 오디오도 다 끝났다면 화면 전환
+                if self.is_finishing:
+                    print("[Logic] Last TTS finished. Moving to Feedback Page.")
+                    self.is_finishing = False
+                    self.sig_transition_to_feedback.emit()
 
     async def run_client(self):
         self.main_loop = asyncio.get_running_loop()
@@ -324,8 +330,6 @@ class MainWindow(QMainWindow):
                         self._session_log.append({"type": mtype, "content": data})
 
                     if mtype == "ai_text":
-                        # 텍스트는 인트로 중이어도 미리 보여줄지, 아닐지 결정해야 함.
-                        # 여기서는 미리 보여주도록 처리 (영상과 싱크를 맞추려면 이 부분도 버퍼링 필요할 수 있음)
                         self.sig_ai_text.emit(data)
 
                     elif mtype == "user_text":
@@ -334,18 +338,27 @@ class MainWindow(QMainWindow):
                     elif mtype == "coach_feedback":
                         self.sig_feedback_realtime.emit(str(data))
                         self.turn_count += 1
+                        
+                        # [NEW] 마지막 질문이면 종료 플래그를 세우고 TTS 완료 대기
                         if self.turn_count >= self.expected_questions:
+                            print("[Log] All turns finished. Preparing to finish...")
                             await self.send_queue.put(json.dumps({"type": "flag", "data": "finish"}))
+                            
                             agg = {"type": "session_log", "items": self._session_log}
                             self._session_log = [] 
+                            
                             self.sig_feedback_final.emit(agg)
-                            self.sig_transition_to_feedback.emit()
+                            
+                            # 바로 전환하지 않고 플래그 설정 -> check_tts_finished에서 처리
+                            self.is_finishing = True
+                            # self.sig_transition_to_feedback.emit() (삭제됨)
                         
                     elif mtype == "feedback":
                         feedback_str = data.get("message", str(data)) if isinstance(data, dict) else str(data)
                         self.sig_feedback_realtime.emit(feedback_str)
                     
                     elif mtype == "final_analysis":
+                        print("[Log] Final Report Received!")
                         self.sig_feedback_summary.emit(data)
 
                 elif isinstance(message, bytes):
