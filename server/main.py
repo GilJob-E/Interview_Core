@@ -119,8 +119,6 @@ async def interview_endpoint(websocket: WebSocket):
                             bytes_per_sec = 16000 * 4
                             silence_bytes = int(silence_duration * bytes_per_sec)
                             
-                            # 버퍼 길이보다 더 많이 자르지 않도록 방어 로직 (최소 0.1초는 남기거나 안전장치)
-                            # 너무 빡빡하게 자르면 문장 끝이 짤릴 수 있으므로 0.2초 정도 여유(buffer)를 두고 자름.
                             safe_margin_sec = 0.2
                             safe_margin_bytes = int(safe_margin_sec * bytes_per_sec)
                             cut_amount = max(0, silence_bytes - safe_margin_bytes)
@@ -162,17 +160,28 @@ async def interview_endpoint(websocket: WebSocket):
                             print(f"[User]: {user_text}")
                             await websocket.send_json({"type": "user_text", "data": user_text})
 
-                            # 2. 멀티모달 분석 시작
-                            print(f"[Vision] Flushing accumulated stats...")
-                            analysis_task = asyncio.create_task(
-                                analyzer.analyze_turn(
-                                    audio_bytes=trimmed_bytes,
-                                    text_data=user_text,
-                                    duration=duration_sec
-                                )
+                            # ==========================================================
+                            # [변경] 2. 멀티모달 분석을 먼저 수행 (Wait)
+                            # ==========================================================
+                            print(f"[Analysis] Analyzing multimodal features first...")
+                            
+                            # 분석 수행 (await로 결과를 바로 받음)
+                            speak_result = await analyzer.analyze_turn(
+                                audio_bytes=trimmed_bytes,
+                                text_data=user_text,
+                                duration=duration_sec
                             )
+                            
+                            # 분석 결과(피드백) 클라이언트 전송
+                            await websocket.send_json({
+                                "type": "feedback",
+                                "data": speak_result
+                            })
+                            print(f"[Analysis Done] Features Ready.")
 
-                            # [핵심 수정] 3. LLM1 응답 생성 (종료 조건 체크)
+                            # ==========================================================
+                            # [변경] 3. LLM1 응답 생성 (분석 결과 주입)
+                            # ==========================================================
                             current_turns = interview_context["turn_count"]
                             target_turns = interview_context["target_turn_count"]
                             
@@ -197,12 +206,14 @@ async def interview_endpoint(websocket: WebSocket):
                                 # 평소처럼 질문 생성
                                 current_questions = list(interview_context["questions_queue"])
                                 current_history = interview_context["history"]
-                                print(f"[AI] Thinking... (Context Questions: {len(current_questions)})")
+                                print(f"[AI] Thinking... (With Multimodal Context)")
                                 
+                                # ★ [핵심] speak_result(분석 결과) 전달
                                 llm_stream = ai_engine.generate_llm_response(
                                     user_text, 
                                     current_questions, 
-                                    current_history
+                                    current_history,
+                                    analysis_result=speak_result # [New] 면접관에게 비언어 정보 제공
                                 )
                                 
                                 buffer = "" 
@@ -228,25 +239,17 @@ async def interview_endpoint(websocket: WebSocket):
                                     for audio_chunk in audio_stream:
                                         await websocket.send_bytes(audio_chunk)
 
-                            # 4. 분석 결과 대기 및 전송
-                            speak_result = await analysis_task
-                            print(f"[Analysis Done] Features Extracted.")
-                            await websocket.send_json({
-                                "type": "feedback",
-                                "data": speak_result
-                            })
-
-                            # 5. LLM2 (면접 코치) - Async Task
+                            # 4. LLM2 (면접 코치) - Async Task
                             async def send_coach_feedback_task(u_text, s_result, a_text):
                                 print("[Coach] Generating Feedback (GPT-4o)...")
                                 
-                                # history 전달 (interview_context는 상위 스코프 변수)
+                                # history 전달
                                 current_history = interview_context["history"]
                                 
                                 c_msg = await ai_engine.generate_instant_feedback(
                                     u_text, 
                                     s_result, 
-                                    current_history # [New] 기억력 주입
+                                    current_history 
                                 )
                                 print(f"[Coach]: {c_msg}")
                                 
@@ -262,9 +265,8 @@ async def interview_endpoint(websocket: WebSocket):
                                     "coach_feedback": c_msg
                                 })
                                 
-                                # [핵심 수정] 마지막 턴이었다면 종료 신호 전송
+                                # 마지막 턴이었다면 종료 신호 전송
                                 if is_final_turn:
-                                    # 5초 대기
                                     wait_time = 5
                                     print(f"[System] Final turn. Waiting {wait_time:.1f}s for TTS...")
                                     await asyncio.sleep(wait_time) 
@@ -272,7 +274,7 @@ async def interview_endpoint(websocket: WebSocket):
                                     print("[System] Sending 'interview_end' signal...")
                                     await websocket.send_json({"type": "interview_end"})
                                     
-                            # 태스크 생성 (풀 텍스트 전달)
+                            # 태스크 생성
                             asyncio.create_task(send_coach_feedback_task(user_text, speak_result, full_ai_text))
                             print("[Turn] Cycle Completed")
 
@@ -291,7 +293,6 @@ async def interview_endpoint(websocket: WebSocket):
                     if msg_type == "text":
                         intro_text = payload.get("data", "")
                         
-                        # [New] 클라이언트 설정값 적용 (질문 개수)
                         config = payload.get("config", {})
                         if "question_count" in config:
                             interview_context["target_turn_count"] = int(config["question_count"])
@@ -300,10 +301,8 @@ async def interview_endpoint(websocket: WebSocket):
                         interview_context["intro_text"] = intro_text
                         print(f"[INTRO] Analyzing resume (len={len(intro_text)})...")
                         
-                        # 자소서 분석
                         analysis_result = ai_engine.analyze_resume_and_generate_questions(intro_text)
 
-                        # 분석 결과 터미널 출력
                         summary = analysis_result.get("summary", "요약 없음")
                         generated_qs = analysis_result.get("questions", [])
 
@@ -318,39 +317,32 @@ async def interview_endpoint(websocket: WebSocket):
                         print("="*60 + "\n")
                         
                         if generated_qs:
-                            # 큐에 '저장'만 해두고, LLM이 대화할 때 참고하게 함
                             interview_context["questions_queue"] = deque(generated_qs)
 
-                        # 첫 질문 (고정)
                         initial_question = "안녕하세요! 테슬라 면접에 오신걸 환영합니다. 먼저 간단하게 자기소개를 해주세요"
                         print(f"[AI] Start: {initial_question}")
                         
                         await websocket.send_json({"type": "ai_text", "data": initial_question})
                         
-                        # TTS 스트리밍
                         print("[TTS] Streaming initial question...")
                         audio_stream = ai_engine.text_to_speech_stream(initial_question)
                         
                         for audio_chunk in audio_stream:
                             await websocket.send_bytes(audio_chunk)
 
-                        # 클라이언트에게 ACK 전송
                         await websocket.send_json({"type": "ack", "what": "intro_received"})
 
-                    # [2] 비디오 프레임 처리 (실시간 분석)
-                    # 리스트에 쌓지 않고 즉시 처리하여 레이턴시를 없앱니다.
+                    # [2] 비디오 프레임 처리
                     elif msg_type == "video_frame":
                         img_data = base64.b64decode(payload["data"])
                         np_arr = np.frombuffer(img_data, np.uint8)
                         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                        
                         if frame is not None:
                             analyzer.process_vision_frame(frame)
 
                     # [3] 종료 신호 처리
                     elif msg_type == "flag" and payload.get("data") == "finish":
                         print("\n[Interview Finished] Generating Final Report...")
-                        # 루프 탈출 -> 리포트 생성 단계로 이동
                         break
 
                 except Exception as e:
@@ -365,11 +357,6 @@ async def interview_endpoint(websocket: WebSocket):
             final_report = "대화 히스토리 없음"
         else:
             print(f"[Report] Analyzing {len(interview_context['history'])} turns... (Please Wait)")
-            
-            # (선택) 클라이언트에게 "분석 중" 알림 보내기
-            # await websocket.send_json({"type": "ai_text", "data": "면접 결과를 분석 중입니다. 잠시만 기다려주세요..."})
-
-            # LLM2에게 전체 히스토리 + 자소서 넘기기 (V2: 상세 피드백 + 역량 분석 포함)
             final_report = await ai_engine.generate_final_report_v2(
                 interview_context["history"],
                 interview_context.get("intro_text", "")
@@ -378,22 +365,25 @@ async def interview_endpoint(websocket: WebSocket):
         print("\n" + "="*60)
         print("[FINAL REPORT V2]")
         print("-" * 60)
-        # V2는 dict 형태이므로 JSON으로 출력
         import json as json_lib
         print(json_lib.dumps(final_report, ensure_ascii=False, indent=2)[:2000] + "...")
         print("="*60 + "\n")
 
-        # 클라이언트에게 리포트 전송 (V2: 구조화된 JSON)
         await websocket.send_json({
             "type": "final_analysis",
             "data": final_report
         })
         
-        # 연결 종료 대기
         await asyncio.sleep(1)
 
     except WebSocketDisconnect:
         print("[WS] Client Disconnected")
+    except RuntimeError as e:
+        # 연결 종료 후 수신 시도 에러 무시
+        if "disconnect message" in str(e):
+            print("[WS] Client Disconnected (RuntimeError)")
+        else:
+            print(f"[Runtime Error] {e}")
     except Exception as e:
         print(f"[Error] {e}")
         import traceback

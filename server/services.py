@@ -113,15 +113,52 @@ class AIOrchestrator:
             return {"summary": "분석 실패", "questions": ["자기소개를 해주세요."]}
 
     # LLM1: 면접관 (질문 및 대화 진행)
-    def generate_llm_response(self, user_text: str, questions_list: list, history: list = []):
-        # model_id = "llama-3.3-70b-versatile" 안씀
+    def generate_llm_response(self, user_text: str, questions_list: list, history: list = [], analysis_result: dict = None):
+        # 멀티모달 데이터 해석 (Z-Score 기반 상태 추론)
+        non_verbal_context = "특이사항 없음 (차분한 상태)"
+        
+        if analysis_result:
+            feats = analysis_result.get("multimodal_features", {})
+            
+            # 지표 추출
+            vol_z = feats.get("audio", {}).get("intensity", {}).get("z_score", 0)
+            pause_z = feats.get("audio", {}).get("pause_duration", {}).get("z_score", 0)
+            unvoiced_z = feats.get("audio", {}).get("unvoiced_duration", {}).get("z_score", 0)
+            
+            spd_z = feats.get("text", {}).get("wpsec", {}).get("z_score", 0)
+            
+            eye_z = feats.get("video", {}).get("eye_contact", {}).get("z_score", 0)
+            # smile_z = feats.get("video", {}).get("smile", {}).get("z_score", 0)
+        
+            
+            # 상태 판단 로직
+            states = []
+            if vol_z < -1.0: states.append("목소리가 작고 위축됨")
+            if spd_z > 1.0: states.append("말이 빠르고 급함(긴장)")
+            elif spd_z < -1.0: states.append("답변이 늘어짐")
+            if eye_z < -2.0: states.append("시선이 불안함")
+            if pause_z > 1.0: states.append("답변을 망설임")
+            
+            if states:
+                non_verbal_context = ", ".join(states)
         
         # 질문 리스트를 텍스트로 변환
         q_text = "\n".join([f"- {q}" for q in questions_list])
         
         system_prompt = f"""
         당신은 베테랑 면접관이자 업계의 시니어입니다. 
-        지원자의 답변("{user_text}")에 대해 이전 대화 맥락을 고려하여 자연스럽고 예리하게 반응하며 대화를 이어가세요.
+        지원자의 답변("{user_text}")과 [비언어적 태도]에 대해 이전 대화 맥락을 고려하여 자연스럽고 예리하게 반응하며 대화를 이어가세요.
+        
+        [현재 지원자의 비언어적 태도]
+        "{non_verbal_context}"
+
+        [반응 가이드]
+        1. **긴장한 상태(목소리 작음, 말 빠름, 시선 불안)**라면: "긴장하지 말고 천천히 말씀해보세요", "목소리를 조금만 크게 해주시겠어요?" 처럼 부드럽게 격려하며 시작하세요.
+        2. **자신감 있는 상태**라면: 조금 더 예리한 꼬리질문으로 압박하세요.
+        3. **답변을 망설인다면**: "생각할 시간을 드릴까요?" 혹은 힌트를 주는 질문을 던지세요.
+        4. 기본 원칙: 답변이 부족하면 꼬리질문, 충분하면 다음 [질문 리스트]로 넘어갑니다.
+        5. 말투: 정중하지만 냉철한 면접관 톤을 유지하세요.
+        
         
         [지침]
         1. 한글로 답변하세요.
@@ -145,8 +182,12 @@ class AIOrchestrator:
             if turn.get('ai_text'):
                 messages.append({"role": "assistant", "content": turn['ai_text']})
 
-        # 3. 현재 사용자 발화 추가
-        messages.append({"role": "user", "content": user_text})
+        # 현재 발화 + 비언어 정보 힌트
+        final_user_content = f"""
+        [답변]: {user_text}
+        [시스템 감지]: 지원자는 현재 '{non_verbal_context}' 상태입니다. 이에 맞춰 반응하세요.
+        """
+        messages.append({"role": "user", "content": final_user_content})
 
         return self.openai_client.chat.completions.create(
             model="gpt-4o",
