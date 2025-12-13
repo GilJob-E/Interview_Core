@@ -6,7 +6,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QBrush
-# [수정] 모든 관련 위젯을 여기서 import
 from widgets.feedback_items import TurnWidget, DetailedFeedbackTab, SkillsAnalysisTab
 from widgets.charts import SimpleLineChartWidget, AverageZScoreChartWidget
 import settings
@@ -68,10 +67,10 @@ class SummaryReportDialog(QDialog):
             feedback_tab = DetailedFeedbackTab(detailed_feedback)
             tabs.addTab(feedback_tab, "질문별 피드백")
 
-        # 4. Skills Analysis Tab
-        if skills_analysis:
-            skills_tab = SkillsAnalysisTab(skills_analysis)
-            tabs.addTab(skills_tab, "역량 분석")
+        # 4. Skills Analysis Tab [DISABLED]
+        # if skills_analysis and (skills_analysis.get('soft_skills') or skills_analysis.get('hard_skills') or skills_analysis.get('recommended_jobs')):
+        #     skills_tab = SkillsAnalysisTab(skills_analysis)
+        #     tabs.addTab(skills_tab, "역량 분석")
         
         btn_ok = QPushButton("닫기"); btn_ok.clicked.connect(self.accept)
         layout.addWidget(btn_ok, 0, Qt.AlignmentFlag.AlignCenter)
