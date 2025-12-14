@@ -5,7 +5,8 @@
 
 ### Features
 * **Latency-Optimized Architecture:** Streaming Pipeline을 통해 발화 후 3초 이내 응답.
-* **Multimodal Analysis:** * **Audio:** Pitch, Speaking Rate등 분석 (Confidence & Fluency 측정)
+* **Multimodal Analysis:**
+    * **Audio:** Pitch, Speaking Rate등 분석 (Confidence & Fluency 측정)
     * **Text:** 형태소 추출 및 어휘 다양성 분석 
     * **Vision:** Eye Tracking & Facial Expression
 * **Academic Basis:**
@@ -28,6 +29,7 @@
 
 ### 1. Prerequisites
 * Python 3.10+
+* FFMPEG
 
 ### 2. Install Dependencies
 ```bash
@@ -42,14 +44,6 @@ Create a .env file in the server/ directory:
 GROQ_API_KEY=your_groq_key
 ELEVENLABS_API_KEY=your_elevenlabs_key
 ```
-
-### 4. FFMPEG (수정필요)
-To enable GPU acceleration for Faster-Whisper on Windows:
-
-Download cuDNN v9 and zlibwapi.dll.
-
-Place the .dll files in the server/ directory.
-
 
 ##  Usage
 ### 1. Start Server
